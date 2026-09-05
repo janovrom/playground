@@ -1,0 +1,18 @@
+[Unit]
+Description=Modular Monolith Host
+After=network.target
+
+[Service]
+Type=exec
+User=modularmonolith
+Group=modularmonolith
+WorkingDirectory=/opt/modular-monolith
+ExecStart=/usr/bin/dotnet /opt/modular-monolith/ModularMonolith.Host.dll
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5227
+Delegate=yes
+Slice=modular-monolith.slice
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

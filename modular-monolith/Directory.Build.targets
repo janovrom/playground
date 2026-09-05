@@ -1,0 +1,12 @@
+<Project>
+  <Target Name="IncludeDeploymentAssets" AfterTargets="Publish" Condition="'$(MSBuildProjectName)' == 'ModularMonolith.Host'">
+    <Copy
+      SourceFiles="$(MSBuildThisFileDirectory)deploy/systemd/modular-monolith.service"
+      DestinationFolder="$(PublishDir)systemd/"
+      SkipUnchangedFiles="true" />
+    <Copy
+      SourceFiles="$(MSBuildThisFileDirectory)deploy/scripts/install.sh;$(MSBuildThisFileDirectory)deploy/scripts/uninstall.sh;$(MSBuildThisFileDirectory)deploy/scripts/run.sh"
+      DestinationFolder="$(PublishDir)scripts/"
+      SkipUnchangedFiles="true" />
+  </Target>
+</Project>

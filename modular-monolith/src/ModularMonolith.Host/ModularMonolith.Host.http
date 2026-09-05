@@ -1,0 +1,23 @@
+@ModularMonolithHost_HostAddress = http://localhost:5227
+
+### Basic information
+GET {{ModularMonolithHost_HostAddress}}/
+
+### Health check
+GET {{ModularMonolithHost_HostAddress}}/health
+
+### Get all items
+GET {{ModularMonolithHost_HostAddress}}/modules
+
+### Query work
+POST {{ModularMonolithHost_HostAddress}}/modules/sales
+Content-Type: application/json
+
+{
+    "moduleName": "Sales",
+    "operation": "do-stuff",
+    "payload": "lot of stuff"
+}
+
+### Query work with worker
+POST {{ModularMonolithHost_HostAddress}}/modules/sales/workers
