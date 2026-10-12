@@ -11,6 +11,14 @@ ExecStart=/usr/bin/dotnet /opt/modular-monolith/ModularMonolith.Host.dll
 Environment=ASPNETCORE_URLS=http://127.0.0.1:5227
 Delegate=yes
 Slice=modular-monolith.slice
+RuntimeDirectory=modular-monolith
+RuntimeDirectoryMode=0700
+StateDirectory=modular-monolith
+StateDirectoryMode=0750
+Environment=Workers__SocketDirectory=/run/modular-monolith
+Environment=ImageCache__DatabasePath=/var/lib/modular-monolith/image-cache.db
+KillMode=mixed
+TimeoutStopSec=30
 Restart=on-failure
 RestartSec=2
 

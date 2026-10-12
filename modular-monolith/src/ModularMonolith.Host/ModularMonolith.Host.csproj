@@ -7,8 +7,63 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ModularMonolith.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
     <ProjectReference Include="..\ModularMonolith.Contracts\ModularMonolith.Contracts.csproj" />
     <ProjectReference Include="..\ModularMonolith.Linux\ModularMonolith.Linux.csproj" />
+    <ProjectReference Include="..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="CopyWorkerOutputs" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj"
+             Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="SvgRendererAssembly" />
+    </MSBuild>
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj"
+             Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="ImageCacheAssembly" />
+    </MSBuild>
+    <CreateItem Include="@(SvgRendererAssembly->'%(RootDir)%(Directory)**\*')">
+      <Output TaskParameter="Include" ItemName="SvgRendererFiles" />
+    </CreateItem>
+    <CreateItem Include="@(ImageCacheAssembly->'%(RootDir)%(Directory)**\*')">
+      <Output TaskParameter="Include" ItemName="ImageCacheFiles" />
+    </CreateItem>
+    <MakeDir Directories="$(OutDir)workers\ModularMonolith.Worker.SvgRenderer;$(OutDir)workers\ModularMonolith.Worker.ImageCache" />
+    <Copy SourceFiles="@(SvgRendererFiles)"
+          DestinationFiles="@(SvgRendererFiles->'$(OutDir)workers\ModularMonolith.Worker.SvgRenderer\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ImageCacheFiles)"
+          DestinationFiles="@(ImageCacheFiles->'$(OutDir)workers\ModularMonolith.Worker.ImageCache\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyPublishedWorkerOutputs" AfterTargets="Publish">
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj"
+             Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="PublishedSvgRendererAssembly" />
+    </MSBuild>
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj"
+             Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="PublishedImageCacheAssembly" />
+    </MSBuild>
+    <CreateItem Include="@(PublishedSvgRendererAssembly->'%(RootDir)%(Directory)**\*')">
+      <Output TaskParameter="Include" ItemName="PublishedSvgRendererFiles" />
+    </CreateItem>
+    <CreateItem Include="@(PublishedImageCacheAssembly->'%(RootDir)%(Directory)**\*')">
+      <Output TaskParameter="Include" ItemName="PublishedImageCacheFiles" />
+    </CreateItem>
+    <MakeDir Directories="$(PublishDir)workers\ModularMonolith.Worker.SvgRenderer;$(PublishDir)workers\ModularMonolith.Worker.ImageCache" />
+    <Copy SourceFiles="@(PublishedSvgRendererFiles)"
+          DestinationFiles="@(PublishedSvgRendererFiles->'$(PublishDir)workers\ModularMonolith.Worker.SvgRenderer\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(PublishedImageCacheFiles)"
+          DestinationFiles="@(PublishedImageCacheFiles->'$(PublishDir)workers\ModularMonolith.Worker.ImageCache\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

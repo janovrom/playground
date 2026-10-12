@@ -20,6 +20,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ModularMonolith.Linux\ModularMonolith.Linux.csproj" />
+    <ProjectReference Include="..\..\src\ModularMonolith.Contracts\ModularMonolith.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\ModularMonolith.Host\ModularMonolith.Host.csproj" />
+    <ProjectReference Include="..\..\src\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" />
+    <ProjectReference Include="..\..\src\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj" />
   </ItemGroup>
 
 </Project>

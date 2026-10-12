@@ -71,7 +71,8 @@ public sealed class CgroupWorkerLauncher : IWorkerLauncher
         try
         {
             File.WriteAllText(Path.Combine(cgroupPath, "cgroup.procs"), $"{process.Id}\n");
-            return new WorkerProcess(process);
+            var recursiveCleanup = !_cgroupRoot.StartsWith("/sys/fs/cgroup", StringComparison.Ordinal);
+            return new WorkerProcess(process, cgroupPath, recursiveCleanup);
         }
         catch
         {

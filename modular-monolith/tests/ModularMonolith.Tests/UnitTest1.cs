@@ -49,8 +49,8 @@ public class LinuxProcessGuardTests
         try
         {
             var launcher = new CgroupWorkerLauncher(cgroupRoot);
-            using var worker = launcher.Launch(new WorkerLaunchOptions("sales", "/bin/sh", ["-c", "sleep 5"]));
-            var cgroupPath = Assert.Single(Directory.GetDirectories(cgroupRoot, "module-sales-*"));
+            using var worker = launcher.Launch(new WorkerLaunchOptions("test-worker", "/bin/sh", ["-c", "sleep 5"]));
+            var cgroupPath = Assert.Single(Directory.GetDirectories(cgroupRoot, "module-test-worker-*"));
 
             Assert.Equal("+memory +cpu +pids\n", File.ReadAllText(Path.Combine(cgroupRoot, "cgroup.subtree_control")));
             Assert.Equal("128M\n", File.ReadAllText(Path.Combine(cgroupPath, "memory.max")));
@@ -68,7 +68,7 @@ public class LinuxProcessGuardTests
     [Fact]
     public void Launch_ShouldStartWorkerWithoutCgroupForLocalDevelopment()
     {
-        using var worker = new LocalWorkerLauncher().Launch(new WorkerLaunchOptions("sales", "/bin/sh", ["-c", "sleep 5"]));
+        using var worker = new LocalWorkerLauncher().Launch(new WorkerLaunchOptions("test-worker", "/bin/sh", ["-c", "sleep 5"]));
 
         Assert.True(worker.ProcessId > 0);
     }
@@ -76,7 +76,7 @@ public class LinuxProcessGuardTests
     [Fact]
     public async Task WorkerProcess_ShouldRaiseExitedWithExitCode()
     {
-        using var worker = new LocalWorkerLauncher().Launch(new WorkerLaunchOptions("sales", "/bin/sh", ["-c", "exit 7"]));
+        using var worker = new LocalWorkerLauncher().Launch(new WorkerLaunchOptions("test-worker", "/bin/sh", ["-c", "exit 7"]));
         var exited = new TaskCompletionSource<WorkerExitedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
         worker.Exited += args => exited.TrySetResult(args);
 
@@ -89,7 +89,7 @@ public class LinuxProcessGuardTests
     [Fact]
     public async Task WorkerProcess_Stop_ShouldTerminateRunningWorker()
     {
-        using var worker = new LocalWorkerLauncher().Launch(new WorkerLaunchOptions("sales", "/bin/sh", ["-c", "sleep 30"]));
+        using var worker = new LocalWorkerLauncher().Launch(new WorkerLaunchOptions("test-worker", "/bin/sh", ["-c", "sleep 30"]));
 
         worker.Stop();
         await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));

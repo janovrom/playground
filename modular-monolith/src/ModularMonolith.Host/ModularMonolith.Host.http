@@ -1,23 +1,19 @@
 @ModularMonolithHost_HostAddress = http://localhost:5227
 
-### Basic information
-GET {{ModularMonolithHost_HostAddress}}/
-
-### Health check
+### Host health check
 GET {{ModularMonolithHost_HostAddress}}/health
 
-### Get all items
+### Worker process status
 GET {{ModularMonolithHost_HostAddress}}/modules
 
-### Query work
-POST {{ModularMonolithHost_HostAddress}}/modules/sales
-Content-Type: application/json
+### Display the default grid page (inspect X-Cache for MISS/HIT)
+GET {{ModularMonolithHost_HostAddress}}/
 
-{
-    "moduleName": "Sales",
-    "operation": "do-stuff",
-    "payload": "lot of stuff"
-}
+### Display a radial grid page
+GET {{ModularMonolithHost_HostAddress}}/?pattern=Radial&size=8
 
-### Query work with worker
-POST {{ModularMonolithHost_HostAddress}}/modules/sales/workers
+### Get standalone SVG (first request should miss; repeat to observe a cache hit)
+GET {{ModularMonolithHost_HostAddress}}/grid.svg?pattern=Checkerboard&size=6
+
+### Get standalone SVG with a normalized fallback pattern and bounded size
+GET {{ModularMonolithHost_HostAddress}}/grid.svg?pattern=unknown&size=99

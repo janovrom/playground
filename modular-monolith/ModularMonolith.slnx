@@ -1,8 +1,9 @@
 <Solution>
   <Project Path="src/ModularMonolith.Contracts/ModularMonolith.Contracts.csproj" />
   <Project Path="src/ModularMonolith.Linux/ModularMonolith.Linux.csproj" />
+  <Project Path="src/ModularMonolith.Worker.Hosting/ModularMonolith.Worker.Hosting.csproj" />
   <Project Path="src/ModularMonolith.Host/ModularMonolith.Host.csproj" />
-  <Project Path="src/ModularMonolith.Worker.Sales/ModularMonolith.Worker.Sales.csproj" />
-  <Project Path="src/ModularMonolith.Worker.Inventory/ModularMonolith.Worker.Inventory.csproj" />
+  <Project Path="src/ModularMonolith.Worker.SvgRenderer/ModularMonolith.Worker.SvgRenderer.csproj" />
+  <Project Path="src/ModularMonolith.Worker.ImageCache/ModularMonolith.Worker.ImageCache.csproj" />
   <Project Path="tests/ModularMonolith.Tests/ModularMonolith.Tests.csproj" />
 </Solution>
