@@ -9,6 +9,7 @@
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.66" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <ProjectReference Include="..\ModularMonolith.Contracts\ModularMonolith.Contracts.csproj" />
     <ProjectReference Include="..\ModularMonolith.Worker.Hosting\ModularMonolith.Worker.Hosting.csproj" />
   </ItemGroup>
 

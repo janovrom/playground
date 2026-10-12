@@ -1,13 +1,14 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace ModularMonolith.Linux;
+namespace ModularMonolith.Abstractions;
 
 public sealed class WorkerProcess : IDisposable
 {
     private readonly Process _process;
-    private readonly string? _cgroupPath;
-    private readonly bool _recursiveCgroupCleanup;
+    private readonly IJob? _job;
+    private readonly IGracefulStopHandle? _stopHandle;
     private int _exitNotified;
 
     public event Action<WorkerExitedEventArgs>? Exited;
@@ -17,11 +18,11 @@ public sealed class WorkerProcess : IDisposable
 
     public int? ExitCode => _process.HasExited ? _process.ExitCode : null;
 
-    internal WorkerProcess(Process process, string? cgroupPath = null, bool recursiveCgroupCleanup = false)
+    internal WorkerProcess(Process process, IJob? job = null, IGracefulStopHandle? stopHandle = null)
     {
         _process = process;
-        _cgroupPath = cgroupPath;
-        _recursiveCgroupCleanup = recursiveCgroupCleanup;
+        _job = job;
+        _stopHandle = stopHandle;
 
         _process.EnableRaisingEvents = true;
         _process.Exited += OnProcessExited;
@@ -39,20 +40,32 @@ public sealed class WorkerProcess : IDisposable
 
     public void Stop()
     {
+        if (_process.HasExited)
+        {
+            return;
+        }
+
+        _job?.Terminate();
+
         if (!_process.HasExited)
         {
             try
             {
                 _process.Kill(entireProcessTree: true);
             }
-            catch (InvalidOperationException) when (_process.HasExited)
+            catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
             {
+                // The process may already be terminating (for example after the job was terminated) and refuse a second kill.
+                if (!_process.WaitForExit(TimeSpan.FromSeconds(5)))
+                {
+                    throw;
+                }
             }
+        }
 
-            if (!_process.HasExited)
-            {
-                _process.WaitForExit();
-            }
+        if (!_process.HasExited)
+        {
+            _process.WaitForExit();
         }
     }
 
@@ -63,7 +76,7 @@ public sealed class WorkerProcess : IDisposable
             return;
         }
 
-        if (!OperatingSystem.IsLinux() || !LinuxSignals.Send(_process.Id, LinuxSignals.SigTerm))
+        if (_stopHandle is null || !_stopHandle.TryRequestStop())
         {
             Stop();
             return;
@@ -95,9 +108,7 @@ public sealed class WorkerProcess : IDisposable
         Stop();
         _process.Exited -= OnProcessExited;
         _process.Dispose();
-        if (_cgroupPath is not null && Directory.Exists(_cgroupPath))
-        {
-            Directory.Delete(_cgroupPath, _recursiveCgroupCleanup);
-        }
+        _stopHandle?.Dispose();
+        _job?.Dispose();
     }
 }

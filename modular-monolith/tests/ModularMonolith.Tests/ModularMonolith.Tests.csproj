@@ -19,7 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\ModularMonolith.Abstractions\ModularMonolith.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\ModularMonolith.Linux\ModularMonolith.Linux.csproj" />
+    <ProjectReference Include="..\..\src\ModularMonolith.Windows\ModularMonolith.Windows.csproj" />
+    <ProjectReference Include="..\..\src\ModularMonolith.Platform\ModularMonolith.Platform.csproj" />
     <ProjectReference Include="..\..\src\ModularMonolith.Contracts\ModularMonolith.Contracts.csproj" />
     <ProjectReference Include="..\..\src\ModularMonolith.Host\ModularMonolith.Host.csproj" />
     <ProjectReference Include="..\..\src\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" />

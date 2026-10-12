@@ -1,48 +1,73 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using ModularMonolith.Linux;
+using Microsoft.Extensions.Logging;
+using ModularMonolith.Platform;
+using ModularMonolith.Platform.Transport;
 
 namespace ModularMonolith.Worker.Hosting;
 
 public static class WorkerHost
 {
-    public static void Configure(WebApplicationBuilder builder)
+    private const string ShutdownEventKey = "Worker:ShutdownEvent";
+
+    public static async Task RunAsync(string[] args, IWorkerModule module, CancellationToken cancellationToken = default)
     {
-        var socketPath = builder.Configuration["Worker:SocketPath"];
-        if (string.IsNullOrWhiteSpace(socketPath))
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(module);
+
+        var builder = WebApplication.CreateBuilder(args);
+        Configure(builder);
+        await module.ConfigureServicesAsync(builder, cancellationToken);
+
+        var app = builder.Build();
+        app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+        module.MapEndpoints(app);
+
+        await app.RunAsync(cancellationToken);
+    }
+
+    private static void Configure(WebApplicationBuilder builder)
+    {
+        var address = builder.Configuration["Worker:Endpoint"];
+        if (string.IsNullOrWhiteSpace(address))
         {
-            throw new InvalidOperationException("Worker:SocketPath must be configured.");
+            throw new InvalidOperationException("Worker:Endpoint must be configured.");
         }
 
-        var fullSocketPath = Path.GetFullPath(socketPath);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullSocketPath)!);
-        File.Delete(fullSocketPath);
+        var transport = WorkerTransports.Resolve(builder.Configuration["Worker:Transport"]);
+        var endpoint = new WorkerEndpoint(transport.Name, address);
 
-        builder.WebHost.ConfigureKestrel(options => options.ListenUnixSocket(fullSocketPath));
+        builder.WebHost.ConfigureKestrel(options => transport.Listen(options, endpoint));
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(8));
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-        LinuxProcessGuard.EnsureKillOnParentExit();
+        PlatformServices.CreateProcessGuard().EnsureKillOnParentExit();
 
-        builder.Services.AddSingleton(new WorkerSocketCleanup(fullSocketPath));
-        builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WorkerSocketCleanup>());
+        builder.Services.AddSingleton(new WorkerEndpointCleanup(transport, endpoint));
+        builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WorkerEndpointCleanup>());
+
+        var shutdownEvent = builder.Configuration[ShutdownEventKey];
+        if (!string.IsNullOrWhiteSpace(shutdownEvent))
+        {
+            builder.Services.AddHostedService(serviceProvider => new ShutdownEventListener(
+                shutdownEvent,
+                serviceProvider.GetRequiredService<IHostApplicationLifetime>(),
+                serviceProvider.GetRequiredService<ILogger<ShutdownEventListener>>()));
+        }
     }
 
-    public static void MapHealth(WebApplication app)
-    {
-        app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
-    }
-
-    private sealed class WorkerSocketCleanup(string socketPath) : IHostedService
+    private sealed class WorkerEndpointCleanup(IWorkerTransport transport, WorkerEndpoint endpoint) : IHostedService
     {
         public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
-            File.Delete(socketPath);
+            transport.Cleanup(endpoint);
             return Task.CompletedTask;
         }
     }

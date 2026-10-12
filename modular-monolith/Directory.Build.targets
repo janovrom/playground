@@ -1,11 +1,23 @@
 <Project>
   <Target Name="IncludeDeploymentAssets" AfterTargets="Publish" Condition="'$(MSBuildProjectName)' == 'ModularMonolith.Host'">
+    <PropertyGroup>
+      <PublishesForWindows Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier.StartsWith('win'))</PublishesForWindows>
+      <PublishesForWindows Condition="'$(RuntimeIdentifier)' == ''">$([MSBuild]::IsOSPlatform('Windows'))</PublishesForWindows>
+    </PropertyGroup>
+
     <Copy
+      Condition="'$(PublishesForWindows)' != 'true'"
       SourceFiles="$(MSBuildThisFileDirectory)deploy/systemd/modular-monolith.service"
       DestinationFolder="$(PublishDir)systemd/"
       SkipUnchangedFiles="true" />
     <Copy
+      Condition="'$(PublishesForWindows)' != 'true'"
       SourceFiles="$(MSBuildThisFileDirectory)deploy/scripts/install.sh;$(MSBuildThisFileDirectory)deploy/scripts/uninstall.sh;$(MSBuildThisFileDirectory)deploy/scripts/run.sh"
+      DestinationFolder="$(PublishDir)scripts/"
+      SkipUnchangedFiles="true" />
+    <Copy
+      Condition="'$(PublishesForWindows)' == 'true'"
+      SourceFiles="$(MSBuildThisFileDirectory)deploy/windows/install.ps1;$(MSBuildThisFileDirectory)deploy/windows/uninstall.ps1;$(MSBuildThisFileDirectory)deploy/windows/run.ps1"
       DestinationFolder="$(PublishDir)scripts/"
       SkipUnchangedFiles="true" />
   </Target>

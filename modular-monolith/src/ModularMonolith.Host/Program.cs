@@ -1,35 +1,26 @@
 using System.Net.Http;
 using ModularMonolith.Contracts;
 using ModularMonolith.Host;
-using ModularMonolith.Linux;
+using ModularMonolith.Host.Modules;
+using ModularMonolith.Platform;
 
 var builder = WebApplication.CreateBuilder(args);
-var cgroupRoot = builder.Configuration["Cgroup:Root"];
-var cgroupEnabled = builder.Configuration.GetValue("Cgroup:Enabled", true);
-IWorkerLauncher workerLauncher = cgroupEnabled
-    ? new CgroupWorkerLauncher(cgroupRoot)
-    : new LocalWorkerLauncher();
+builder.Configuration.AddPlatformSettings(PlatformServices.Name);
+builder.Host.UseWindowsService(options => options.ServiceName = "ModularMonolith");
 
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(30));
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
-builder.Services.AddSingleton<IWorkerLauncher>(workerLauncher);
+builder.Services.AddSingleton(PlatformServices.CreateLauncher(builder.Configuration));
+builder.Services.AddSingleton(PlatformServices.ResolveTransport(builder.Configuration));
 builder.Services.AddSingleton<RequestDrainTracker>();
 builder.Services.AddSingleton<WorkerManager>();
-builder.Services.AddSingleton(serviceProvider =>
-{
-    var manager = serviceProvider.GetRequiredService<WorkerManager>();
-    return new RendererClient(UdsHttpClientFactory.Create(manager.GetSocketPath(ModuleCatalog.SvgRenderer)));
-});
-builder.Services.AddSingleton<IRendererClient>(serviceProvider => serviceProvider.GetRequiredService<RendererClient>());
-builder.Services.AddSingleton(serviceProvider =>
-{
-    var manager = serviceProvider.GetRequiredService<WorkerManager>();
-    return new ImageCacheClient(UdsHttpClientFactory.Create(manager.GetSocketPath(ModuleCatalog.ImageCache)));
-});
-builder.Services.AddSingleton<IImageCacheClient>(serviceProvider => serviceProvider.GetRequiredService<ImageCacheClient>());
+builder.Services.AddSingleton<IWorkerEndpointResolver>(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
+builder.Services.AddSingleton<IWorkerClientFactory, WorkerClientFactory>();
+builder.Services.AddHostModule<SvgRendererHostModule>();
+builder.Services.AddHostModule<ImageCacheHostModule>();
 builder.Services.AddSingleton<IGridImageProvider, CachedGridImageProvider>();
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
 
@@ -37,7 +28,7 @@ var app = builder.Build();
 app.UseExceptionHandler();
 app.UseMiddleware<RequestDrainMiddleware>();
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", platform = "linux", pid = Environment.ProcessId }))
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", platform = PlatformServices.Name, pid = Environment.ProcessId }))
     .WithSummary("Check the Host health");
 
 app.MapGet("/modules", (WorkerManager workerManager) => Results.Ok(workerManager.GetStatus()))
@@ -93,6 +84,6 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-LinuxProcessGuard.EnsureKillOnParentExit();
+PlatformServices.CreateProcessGuard().EnsureKillOnParentExit();
 
 app.Run();

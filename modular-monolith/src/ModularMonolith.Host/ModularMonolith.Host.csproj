@@ -12,8 +12,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
     <ProjectReference Include="..\ModularMonolith.Contracts\ModularMonolith.Contracts.csproj" />
-    <ProjectReference Include="..\ModularMonolith.Linux\ModularMonolith.Linux.csproj" />
+    <ProjectReference Include="..\ModularMonolith.Platform\ModularMonolith.Platform.csproj" />
     <ProjectReference Include="..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

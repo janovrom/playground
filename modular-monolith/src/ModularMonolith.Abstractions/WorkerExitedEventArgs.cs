@@ -1,4 +1,4 @@
-namespace ModularMonolith.Linux;
+namespace ModularMonolith.Abstractions;
 
 public sealed class WorkerExitedEventArgs : EventArgs
 {

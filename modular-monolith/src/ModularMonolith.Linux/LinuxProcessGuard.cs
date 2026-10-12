@@ -1,8 +1,9 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
+using ModularMonolith.Abstractions;
 
 namespace ModularMonolith.Linux;
 
-public static partial class LinuxProcessGuard
+public sealed partial class LinuxProcessGuard : IProcessGuard
 {
     public const int PrSetDeathSig = 1;
     public const int SigKill = 9;
@@ -10,7 +11,7 @@ public static partial class LinuxProcessGuard
     [LibraryImport("libc", EntryPoint = "prctl", SetLastError = true)]
     private static partial int prctl(int option, ulong arg2, ulong arg3, ulong arg4, ulong arg5);
 
-    public static void EnsureKillOnParentExit()
+    public void EnsureKillOnParentExit()
     {
         if (!OperatingSystem.IsLinux())
         {

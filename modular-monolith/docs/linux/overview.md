@@ -11,7 +11,9 @@ The Host starts and supervises two worker processes:
 
 The Host normalizes `pattern` and `size`, then uses a versioned cache key (`grid-v1-<pattern>-<size>`). Both `GET /` and `GET /grid.svg` use cache-aside: a cache hit is returned directly; a miss is rendered and stored. The response includes `X-Cache: HIT` or `X-Cache: MISS`. Cache failures are logged and do not prevent rendering. Invalid pattern values fall back to Checkerboard and dimensions are clamped to 2–20.
 
-The supervisor starts both workers before serving requests, polls their `/health` endpoints, and restarts exited workers with exponential backoff. When it detects a worker exit, the Host removes that worker's stale socket path before restarting it; the worker also deletes a stale path before binding as a fallback. A crash closes the kernel socket descriptor, so the leftover path is not a live listener. `GET /modules` reports process IDs, state, and restart counts. In development, the Host creates a private temporary socket directory and uses `Cgroup:Enabled=false`; the SQLite file defaults under the user's local application data directory. Production uses `/run/modular-monolith` for sockets and `/var/lib/modular-monolith/image-cache.db` for persistent cache data. Worker executable paths can be overridden through `Workers:SvgRenderer` and `Workers:ImageCache`; otherwise they are loaded from the adjacent `workers/` directory.
+The supervisor starts both workers before serving requests, polls their `/health` endpoints, and restarts exited workers with exponential backoff. When it detects a worker exit, the Host removes that worker's stale socket path before restarting it; the worker also deletes a stale path before binding as a fallback. A crash closes the kernel socket descriptor, so the leftover path is not a live listener. `GET /modules` reports process IDs, state, and restart counts. In development, the Host creates a private temporary socket directory and uses `Job:Enabled=false`; the SQLite file defaults under the user's local application data directory. Production uses `/run/modular-monolith` for sockets and `/var/lib/modular-monolith/image-cache.db` for persistent cache data; these defaults live in `appsettings.linux.json`, which is loaded after `appsettings.json` and the systemd unit sets the same values through environment variables. Worker executable paths can be overridden through `Workers:SvgRenderer` and `Workers:ImageCache`; otherwise they are loaded from the adjacent `workers/` directory.
+
+Each worker's cgroup is an `IJob` (`CgroupJob`, created by `CgroupJobFactory` behind the shared `JobWorkerLauncher`). Limits come from the platform-neutral `JobLimits`: `memory.max` and `memory.high` in bytes, `cpu.max` derived from `CpuCores`, and `pids.max`; they can be overridden per module with `Workers:<Module>:Limits:MemoryMaxMb`, `MemoryHighMb`, `CpuCores` and `MaxProcesses`. Sockets are provided by `UnixSocketTransport` behind `IWorkerTransport` (`Workers:Transport` defaults to `Auto`), and modules register through `IWorkerModule` (worker) and `IHostModule` (Host); see the [Windows overview](../windows/overview.md#implemented-windows-variant) for the shared abstractions.
 
 On SIGTERM, the Host stops accepting new work at its request drain gate, waits for active Host requests, and sends SIGTERM to both workers concurrently. Workers use the .NET host lifetime to drain requests, the cache checkpoints SQLite, and each worker removes its socket before exit. The Host waits up to `Workers:ShutdownGracePeriod` (10 seconds by default) and force-kills stragglers. `PR_SET_PDEATHSIG` remains a SIGKILL fallback if the Host is killed abruptly. The systemd unit uses `KillMode=mixed` so systemd signals the Host first rather than terminating its workers in parallel.
 
@@ -107,7 +109,7 @@ Native P/Invoke helper used by child workers to guarantee process tree cleanup:
 ```csharp
 using System.Runtime.InteropServices;
 
-public static partial class LinuxProcessGuard
+public sealed partial class LinuxProcessGuard : IProcessGuard
 {
     private const int PR_SET_PDEATHSIG = 1;
     private const int SIGKILL = 9;
@@ -119,7 +121,7 @@ public static partial class LinuxProcessGuard
     /// Guarantees that the Linux kernel kills this child worker if the Host parent process dies.
     /// Call this at worker entrypoint before starting host services.
     /// </summary>
-    public static void EnsureKillOnParentExit()
+    public void EnsureKillOnParentExit()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {

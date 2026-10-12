@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <ProjectReference Include="..\ModularMonolith.Linux\ModularMonolith.Linux.csproj" />
+    <ProjectReference Include="..\ModularMonolith.Platform\ModularMonolith.Platform.csproj" />
   </ItemGroup>
 
 </Project>

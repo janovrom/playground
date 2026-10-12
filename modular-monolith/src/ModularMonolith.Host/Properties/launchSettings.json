@@ -8,7 +8,7 @@
       "applicationUrl": "http://localhost:5227",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "Cgroup__Enabled": "false"
+        "Job__Enabled": "false"
       }
     }
   }

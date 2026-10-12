@@ -2,9 +2,12 @@ using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
+using ModularMonolith.Abstractions;
 using ModularMonolith.Contracts;
 using ModularMonolith.Host;
+using ModularMonolith.Host.Modules;
 using ModularMonolith.Linux;
+using ModularMonolith.Platform.Transport;
 using ModularMonolith.Worker.ImageCache;
 
 namespace ModularMonolith.Tests;
@@ -167,7 +170,12 @@ public sealed class GridModuleTests
     [Fact]
     public async Task WorkerProcess_StopAsync_AllowsSigtermHandlerToExit()
     {
-        using var worker = new LocalWorkerLauncher().Launch(new WorkerLaunchOptions(
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        using var worker = new LocalWorkerLauncher(new SigTermStopStrategy()).Launch(new WorkerLaunchOptions(
             "sigterm-test",
             "/bin/sh",
             ["-c", "trap 'exit 23' TERM; while :; do sleep 0.1; done"]));
@@ -182,7 +190,12 @@ public sealed class GridModuleTests
     [Fact]
     public async Task WorkerProcess_StopAsync_KillsWorkerThatIgnoresSigterm()
     {
-        using var worker = new LocalWorkerLauncher().Launch(new WorkerLaunchOptions(
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        using var worker = new LocalWorkerLauncher(new SigTermStopStrategy()).Launch(new WorkerLaunchOptions(
             "sigterm-ignore-test",
             "/bin/sh",
             ["-c", "trap '' TERM; while :; do sleep 1; done"]));
@@ -215,7 +228,9 @@ public sealed class GridModuleTests
         };
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         var manager = new WorkerManager(
-            new LocalWorkerLauncher(),
+            new LocalWorkerLauncher(new SigTermStopStrategy()),
+            new UnixSocketTransport(),
+            [new SvgRendererHostModule(), new ImageCacheHostModule()],
             configuration,
             NullLogger<WorkerManager>.Instance,
             new RequestDrainTracker());

@@ -1,4 +1,4 @@
-namespace ModularMonolith.Linux;
+namespace ModularMonolith.Abstractions;
 
 public interface IWorkerLauncher
 {

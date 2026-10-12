@@ -1,7 +1,7 @@
-namespace ModularMonolith.Linux;
+namespace ModularMonolith.Abstractions;
 
 public sealed record WorkerLaunchOptions(
     string ModuleName,
     string ExecutablePath,
     IReadOnlyList<string>? Arguments = null,
-    CgroupLimits? Limits = null);
+    JobLimits? Limits = null);

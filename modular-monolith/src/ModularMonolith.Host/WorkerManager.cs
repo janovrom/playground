@@ -1,19 +1,21 @@
 using System.Diagnostics;
 using System.Net.Sockets;
 using Microsoft.Extensions.Hosting;
-using ModularMonolith.Contracts;
-using ModularMonolith.Linux;
+using ModularMonolith.Abstractions;
+using ModularMonolith.Host.Modules;
+using ModularMonolith.Platform.Transport;
 
 namespace ModularMonolith.Host;
 
 internal sealed record WorkerStatus(string Name, int? ProcessId, string State, int RestartCount);
 
-internal sealed class WorkerManager : IHostedService
+internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
 {
     private static readonly TimeSpan MinimumRestartDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaximumRestartDelay = TimeSpan.FromSeconds(30);
 
     private readonly IWorkerLauncher _workerLauncher;
+    private readonly IWorkerTransport _transport;
     private readonly IConfiguration _configuration;
     private readonly ILogger<WorkerManager> _logger;
     private readonly RequestDrainTracker _requestDrainTracker;
@@ -21,48 +23,34 @@ internal sealed class WorkerManager : IHostedService
     private readonly object _gate = new();
     private readonly List<Task> _supervisors = [];
     private CancellationTokenSource? _supervisorCancellation;
-    private string? _temporarySocketDirectory;
+    private IEndpointAllocator? _endpointAllocator;
     private int _stopping;
 
     public WorkerManager(
         IWorkerLauncher workerLauncher,
+        IWorkerTransport transport,
+        IEnumerable<IHostModule> modules,
         IConfiguration configuration,
         ILogger<WorkerManager> logger,
         RequestDrainTracker requestDrainTracker)
     {
         _workerLauncher = workerLauncher;
+        _transport = transport;
         _configuration = configuration;
         _logger = logger;
         _requestDrainTracker = requestDrainTracker;
-        _workers = CreateDefinitions().ToDictionary(worker => worker.Name, StringComparer.Ordinal);
+        _workers = modules.Select(CreateDefinition).ToDictionary(worker => worker.Name, StringComparer.Ordinal);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var configuredDirectory = _configuration["Workers:SocketDirectory"];
-        if (string.IsNullOrWhiteSpace(configuredDirectory))
-        {
-            _temporarySocketDirectory = Directory.CreateTempSubdirectory("modular-monolith-").FullName;
-            if (OperatingSystem.IsLinux())
-            {
-                File.SetUnixFileMode(_temporarySocketDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-
-            configuredDirectory = _temporarySocketDirectory;
-        }
-
-        var socketDirectory = Path.GetFullPath(configuredDirectory);
-        Directory.CreateDirectory(socketDirectory);
-        if (_temporarySocketDirectory is null && OperatingSystem.IsLinux())
-        {
-            File.SetUnixFileMode(socketDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
+        _endpointAllocator = _transport.CreateAllocator(_configuration);
 
         try
         {
             foreach (var worker in _workers.Values)
             {
-                worker.SocketPath = Path.Combine(socketDirectory, $"{worker.Name}.sock");
+                worker.Endpoint = _endpointAllocator.Allocate(worker.Name);
                 worker.Process = Launch(worker);
                 worker.State = "Starting";
             }
@@ -78,7 +66,7 @@ internal sealed class WorkerManager : IHostedService
                 worker.State = "Stopped";
             }
 
-            CleanupSocketDirectory();
+            ReleaseEndpoints();
             throw;
         }
 
@@ -165,7 +153,7 @@ internal sealed class WorkerManager : IHostedService
             worker.State = "Stopped";
         }
 
-        CleanupSocketDirectory();
+        ReleaseEndpoints();
         _supervisorCancellation?.Dispose();
     }
 
@@ -179,62 +167,52 @@ internal sealed class WorkerManager : IHostedService
         }
     }
 
-    public string GetSocketPath(string name)
+    public WorkerEndpoint GetEndpoint(string name)
     {
         lock (_gate)
         {
-            return _workers.TryGetValue(name, out var worker) && worker.SocketPath is not null
-                ? worker.SocketPath
-                : throw new InvalidOperationException($"Worker socket for '{name}' is not configured.");
+            return _workers.TryGetValue(name, out var worker) && worker.Endpoint is not null
+                ? worker.Endpoint
+                : throw new InvalidOperationException($"Worker endpoint for '{name}' is not configured.");
         }
     }
 
-    private IEnumerable<ManagedWorker> CreateDefinitions()
+    private ManagedWorker CreateDefinition(IHostModule module)
     {
-        yield return CreateDefinition(ModuleCatalog.SvgRenderer, "ModularMonolith.Worker.SvgRenderer");
-        yield return CreateDefinition(ModuleCatalog.ImageCache, "ModularMonolith.Worker.ImageCache");
+        var section = _configuration.GetSection($"Workers:{module.ConfigSection}");
+        var (executable, arguments) = WorkerCommandResolver.Resolve(section, module.WorkerProject, AppContext.BaseDirectory);
+        arguments.AddRange(module.GetWorkerArguments(_configuration));
+
+        return new ManagedWorker(module.Name, executable, arguments, ReadLimits(section.GetSection("Limits"), module.DefaultLimits));
     }
 
-    private ManagedWorker CreateDefinition(string name, string projectName)
+    private static JobLimits ReadLimits(IConfigurationSection section, JobLimits defaults)
     {
-        var configName = name == ModuleCatalog.SvgRenderer ? "SvgRenderer" : "ImageCache";
-        var section = _configuration.GetSection($"Workers:{configName}");
-        var executable = section["ExecutablePath"] ?? "dotnet";
-        var arguments = section.GetSection("Arguments").Get<string[]>()?.ToList() ?? [];
-
-        if (arguments.Count == 0)
+        var memoryMaxMegabytes = section.GetValue<long?>("MemoryMaxMb");
+        var memoryHighMegabytes = section.GetValue<long?>("MemoryHighMb");
+        return defaults with
         {
-            arguments.Add(Path.Combine(AppContext.BaseDirectory, "workers", projectName, $"{projectName}.dll"));
-        }
-
-        if (name == ModuleCatalog.ImageCache)
-        {
-            var databasePath = _configuration["ImageCache:DatabasePath"];
-            if (string.IsNullOrWhiteSpace(databasePath))
-            {
-                databasePath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "modular-monolith",
-                    "image-cache.db");
-            }
-
-            arguments.Add($"--ImageCache:DatabasePath={databasePath}");
-        }
-
-        return new ManagedWorker(name, executable, arguments);
+            MemoryMaxBytes = memoryMaxMegabytes is null ? defaults.MemoryMaxBytes : memoryMaxMegabytes * 1024 * 1024,
+            MemoryHighBytes = memoryHighMegabytes is null ? defaults.MemoryHighBytes : memoryHighMegabytes * 1024 * 1024,
+            CpuCores = section.GetValue<double?>("CpuCores") ?? defaults.CpuCores,
+            MaxProcesses = section.GetValue<int?>("MaxProcesses") ?? defaults.MaxProcesses
+        };
     }
 
     private WorkerProcess Launch(ManagedWorker worker)
     {
-        var arguments = worker.Arguments.Concat([$"--Worker:SocketPath={worker.SocketPath}"]).ToArray();
-        return _workerLauncher.Launch(new WorkerLaunchOptions(worker.Name, worker.ExecutablePath, arguments));
+        var endpoint = worker.Endpoint!;
+        var arguments = worker.Arguments
+            .Concat([$"--Worker:Transport={endpoint.Transport}", $"--Worker:Endpoint={endpoint.Address}"])
+            .ToArray();
+        return _workerLauncher.Launch(new WorkerLaunchOptions(worker.Name, worker.ExecutablePath, arguments, worker.Limits));
     }
 
     private async Task WaitUntilReadyAsync(ManagedWorker worker, CancellationToken cancellationToken)
     {
         var timeout = TimeSpan.FromSeconds(_configuration.GetValue("Workers:StartupTimeoutSeconds", 20));
         var stopwatch = Stopwatch.StartNew();
-        using var client = UdsHttpClientFactory.Create(worker.SocketPath!);
+        using var client = _transport.CreateHttpClient(worker.Endpoint!);
 
         while (stopwatch.Elapsed < timeout)
         {
@@ -308,7 +286,7 @@ internal sealed class WorkerManager : IHostedService
                 worker.RestartCount++;
             }
 
-            RemoveStaleSocket(worker);
+            RemoveStaleEndpoint(worker);
             process.Dispose();
             var delayBeforeRestart = restartDelay;
             restartDelay = TimeSpan.FromSeconds(Math.Min(restartDelay.TotalSeconds * 2, MaximumRestartDelay.TotalSeconds));
@@ -375,42 +353,36 @@ internal sealed class WorkerManager : IHostedService
         }
     }
 
-    private void CleanupSocketDirectory()
+    private void ReleaseEndpoints()
     {
-        if (_temporarySocketDirectory is not null && Directory.Exists(_temporarySocketDirectory))
-        {
-            Directory.Delete(_temporarySocketDirectory, recursive: true);
-            _temporarySocketDirectory = null;
-        }
+        _endpointAllocator?.Dispose();
+        _endpointAllocator = null;
     }
 
-    private void RemoveStaleSocket(ManagedWorker worker)
+    private void RemoveStaleEndpoint(ManagedWorker worker)
     {
-        if (worker.SocketPath is null)
+        if (worker.Endpoint is null)
         {
             return;
         }
 
         try
         {
-            File.Delete(worker.SocketPath);
+            _transport.Cleanup(worker.Endpoint);
         }
-        catch (IOException exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(exception, "Could not remove stale socket for worker {WorkerName} at {SocketPath}.", worker.Name, worker.SocketPath);
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            _logger.LogWarning(exception, "Could not remove stale socket for worker {WorkerName} at {SocketPath}.", worker.Name, worker.SocketPath);
+            _logger.LogWarning(exception, "Could not remove stale endpoint for worker {WorkerName} at {Endpoint}.", worker.Name, worker.Endpoint.Address);
         }
     }
 
-    private sealed class ManagedWorker(string name, string executablePath, IReadOnlyList<string> arguments)
+    private sealed class ManagedWorker(string name, string executablePath, IReadOnlyList<string> arguments, JobLimits limits)
     {
         public string Name { get; } = name;
         public string ExecutablePath { get; } = executablePath;
         public IReadOnlyList<string> Arguments { get; } = arguments;
-        public string? SocketPath { get; set; }
+        public JobLimits Limits { get; } = limits;
+        public WorkerEndpoint? Endpoint { get; set; }
         public WorkerProcess? Process { get; set; }
         public string State { get; set; } = "Stopped";
         public int RestartCount { get; set; }
