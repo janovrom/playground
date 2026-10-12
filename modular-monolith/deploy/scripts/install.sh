@@ -44,4 +44,5 @@ install \
     "${UNIT_PATH}"
 
 systemctl daemon-reload
+systemctl reset-failed "${SERVICE_NAME}.service"
 systemctl enable --now "${SERVICE_NAME}.service"

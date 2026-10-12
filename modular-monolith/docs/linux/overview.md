@@ -15,6 +15,8 @@ The supervisor starts both workers before serving requests, polls their `/health
 
 On SIGTERM, the Host stops accepting new work at its request drain gate, waits for active Host requests, and sends SIGTERM to both workers concurrently. Workers use the .NET host lifetime to drain requests, the cache checkpoints SQLite, and each worker removes its socket before exit. The Host waits up to `Workers:ShutdownGracePeriod` (10 seconds by default) and force-kills stragglers. `PR_SET_PDEATHSIG` remains a SIGKILL fallback if the Host is killed abruptly. The systemd unit uses `KillMode=mixed` so systemd signals the Host first rather than terminating its workers in parallel.
 
+systemd allows at most four starts within 60 seconds (the initial start plus three retries). Once that limit is hit, run the installer or `systemctl reset-failed modular-monolith.service` after correcting the cause to reset the counter.
+
 ---
 
 ## Tiered Implementation Architecture
