@@ -19,7 +19,7 @@ public class LinuxProcessGuardTests
         Assert.Equal(9, LinuxProcessGuard.SigKill);
     }
 
-    [Fact]
+    [LinuxFact]
     public void GetCurrentProcessRoot_ShouldResolveNestedSystemdSlice()
     {
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"modular-monolith-{Guid.NewGuid():N}");
