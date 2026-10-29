@@ -25,7 +25,7 @@ jobs:
       # Windows-only tests are skipped on Linux and run for real on Windows.
       - name: Test
         run: dotnet test modular-monolith/ModularMonolith.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-${{ matrix.os }}
