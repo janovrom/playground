@@ -30,7 +30,7 @@ internal sealed class ImageCacheHostModule : IHostModule
     public void ConfigureServices(IServiceCollection services)
     {
         services.AddSingleton(serviceProvider =>
-            new ImageCacheClient(serviceProvider.GetRequiredService<IWorkerClientFactory>().Create(Name)));
+            new ImageCacheClient(serviceProvider.GetRequiredService<IWorkerClientFactory>().Create(Name, ConfigSection)));
         services.AddSingleton<IImageCacheClient>(serviceProvider => serviceProvider.GetRequiredService<ImageCacheClient>());
     }
 }

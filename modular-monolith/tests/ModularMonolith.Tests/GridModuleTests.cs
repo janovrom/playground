@@ -227,21 +227,43 @@ public sealed class GridModuleTests
             ["ImageCache:DatabasePath"] = databasePath
         };
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        var transport = new UnixSocketTransport();
         var manager = new WorkerManager(
             new LocalWorkerLauncher(new SigTermStopStrategy()),
-            new UnixSocketTransport(),
+            transport,
             [new SvgRendererHostModule(), new ImageCacheHostModule()],
             configuration,
             NullLogger<WorkerManager>.Instance,
             new RequestDrainTracker());
+        using var clients = new WorkerClientTestServices(manager, transport, configuration);
 
         try
         {
             await manager.StartAsync(CancellationToken.None);
+            var renderer = clients.GetRequiredService<IRendererClient>();
+            var settingsForRecovery = new GridSettings(2, GridPattern.Checkerboard);
+            Assert.Contains("<svg", await renderer.RenderSvgAsync(settingsForRecovery, CancellationToken.None));
+
             var originalProcessId = Assert.Single(manager.GetStatus(), status => status.Name == "svg-renderer").ProcessId;
             Assert.NotNull(originalProcessId);
             var rendererSocket = Path.Combine(directory.FullName, "svg-renderer.sock");
+
+            var burst = Enumerable.Range(0, 20).Select(async _ =>
+            {
+                try
+                {
+                    await renderer.RenderSvgAsync(settingsForRecovery, CancellationToken.None);
+                }
+                catch (HttpRequestException)
+                {
+                }
+                catch (TaskCanceledException)
+                {
+                }
+            }).ToArray();
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
             Assert.True(LinuxSignals.Send(originalProcessId.Value, LinuxSignals.SigKill));
+            await Task.WhenAll(burst);
 
             var crashTimeout = Stopwatch.StartNew();
             var staleSocketRemoved = false;
@@ -276,6 +298,10 @@ public sealed class GridModuleTests
             Assert.Equal("Running", rendererStatus.State);
             Assert.Equal(1, rendererStatus.RestartCount);
             Assert.NotEqual(originalProcessId, rendererStatus.ProcessId);
+            var recoveredResponses = await Task.WhenAll(
+                Enumerable.Range(0, 20)
+                    .Select(_ => renderer.RenderSvgAsync(settingsForRecovery, CancellationToken.None)));
+            Assert.All(recoveredResponses, svg => Assert.Contains("<svg", svg));
 
             var restartedProcessId = rendererStatus.ProcessId;
             Assert.NotNull(restartedProcessId);

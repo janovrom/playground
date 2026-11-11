@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -64,6 +65,144 @@ public sealed class HostModuleTests
 
         Assert.Throws<InvalidOperationException>(() => manager.GetEndpoint("alpha"));
         Assert.Throws<InvalidOperationException>(() => manager.GetEndpoint("unknown"));
+        Assert.False(manager.IsRunning("alpha"));
+        Assert.Throws<InvalidOperationException>(() => manager.IsRunning("unknown"));
+    }
+
+    [Fact]
+    public async Task WorkerResilience_RetriesTransientConnectionFailuresTwice()
+    {
+        var attempts = 0;
+        var services = new ServiceCollection();
+        services.AddWorkerHttpResilience();
+        services.AddHttpClient("retry-test")
+            .ConfigurePrimaryHttpMessageHandler(() => new CallbackHandler((_, _) =>
+            {
+                if (Interlocked.Increment(ref attempts) < 3)
+                {
+                    throw new HttpRequestException("Transient connection failure.");
+                }
+
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+            }));
+
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("retry-test");
+        client.BaseAddress = new Uri("http://localhost");
+        var stopwatch = Stopwatch.StartNew();
+
+        using var content = new StringContent("payload");
+        using var response = await client.PostAsync("/", content);
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(3, attempts);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Retries exceeded the 2-second restart window: {stopwatch.Elapsed}.");
+    }
+
+    [Fact]
+    public async Task WorkerResilience_StopsAfterTwoRetries()
+    {
+        var attempts = 0;
+        var services = new ServiceCollection();
+        services.AddWorkerHttpResilience();
+        services.AddHttpClient("retry-test")
+            .ConfigurePrimaryHttpMessageHandler(() => new CallbackHandler((_, _) =>
+            {
+                Interlocked.Increment(ref attempts);
+                throw new HttpRequestException("Worker is restarting.");
+            }));
+
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("retry-test");
+        client.BaseAddress = new Uri("http://localhost");
+        var stopwatch = Stopwatch.StartNew();
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("/"));
+
+        Assert.Equal(3, attempts);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Retries exceeded the 2-second restart window: {stopwatch.Elapsed}.");
+    }
+
+    [Fact]
+    public async Task WorkerClientFactory_UsesConfiguredTimeoutAndDefaultsToTenSeconds()
+    {
+        var services = new ServiceCollection();
+        services.AddWorkerHttpResilience();
+        services.AddHttpClient("alpha")
+            .ConfigurePrimaryHttpMessageHandler(() => new CallbackHandler(async (_, cancellationToken) =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+            }));
+
+        using var provider = services.BuildServiceProvider();
+        var configuration = Configuration(("Workers:Alpha:TimeoutSeconds", "1"));
+        var factory = new WorkerClientFactory(provider.GetRequiredService<IHttpClientFactory>(), configuration);
+
+        using var configuredClient = factory.Create("alpha", "Alpha");
+        Assert.Equal(TimeSpan.FromSeconds(1), configuredClient.Timeout);
+        var stopwatch = Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => configuredClient.GetAsync("http://localhost/"));
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Configured timeout took too long: {stopwatch.Elapsed}.");
+
+        using var defaultClient = factory.Create("alpha", "Missing");
+        Assert.Equal(TimeSpan.FromSeconds(10), defaultClient.Timeout);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public void WorkerClientFactory_RejectsNonPositiveTimeouts(string timeout)
+    {
+        var services = new ServiceCollection();
+        services.AddWorkerHttpResilience();
+        services.AddHttpClient("alpha");
+        using var provider = services.BuildServiceProvider();
+        var configuration = Configuration(("Workers:Alpha:TimeoutSeconds", timeout));
+        var factory = new WorkerClientFactory(provider.GetRequiredService<IHttpClientFactory>(), configuration);
+
+        Assert.Throws<InvalidOperationException>(() => factory.Create("alpha", "Alpha"));
+    }
+
+    [Fact]
+    public async Task WorkerReadinessHandler_DoesNotSendWhileWorkerIsUnavailable()
+    {
+        var resolver = new StubEndpointResolver();
+        var inner = new CallbackHandler((_, _) => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)));
+        using var client = new HttpClient(new WorkerReadinessHandler("alpha", resolver) { InnerHandler = inner })
+        {
+            BaseAddress = new Uri("http://localhost")
+        };
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("/"));
+        Assert.Equal(0, inner.RequestCount);
+
+        resolver.Running = true;
+        using var response = await client.GetAsync("/");
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, inner.RequestCount);
+    }
+
+    [Fact]
+    public async Task WorkerResilience_RetriesRequestsUntilWorkerReadinessReturns()
+    {
+        var resolver = new StubEndpointResolver { UnavailableChecks = 2 };
+        var inner = new CallbackHandler((_, _) => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)));
+        var services = new ServiceCollection();
+        services.AddWorkerHttpResilience();
+        services.AddHttpClient("alpha")
+            .ConfigurePrimaryHttpMessageHandler(() => new WorkerReadinessHandler("alpha", resolver) { InnerHandler = inner });
+
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("alpha");
+        client.BaseAddress = new Uri("http://localhost");
+
+        using var content = new StringContent("payload");
+        using var response = await client.PostAsync("/", content);
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(3, resolver.ReadinessChecks);
+        Assert.Equal(1, inner.RequestCount);
     }
 
     [Fact]
@@ -93,6 +232,22 @@ public sealed class HostModuleTests
 
         Assert.Equal([ModuleCatalog.SvgRenderer, ModuleCatalog.ImageCache], factory.Requested);
         Assert.Equal(ModuleCatalog.All.Order(), provider.GetServices<IHostModule>().Select(module => module.Name).Order());
+    }
+
+    [Fact]
+    public void BuiltInClients_DisposeTheirHttpClientsWithTheServiceProvider()
+    {
+        var handler = new TrackingHandler();
+        var services = new ServiceCollection();
+        services.AddSingleton<IWorkerClientFactory>(new FixedClientFactory(new HttpClient(handler)));
+        services.AddHostModule<SvgRendererHostModule>();
+
+        using (var provider = services.BuildServiceProvider())
+        {
+            _ = provider.GetRequiredService<IRendererClient>();
+        }
+
+        Assert.True(handler.Disposed);
     }
 
     [Fact]
@@ -175,11 +330,56 @@ public sealed class HostModuleTests
     {
         public List<string> Requested { get; } = [];
 
-        public HttpClient Create(string moduleName)
+        public HttpClient Create(string moduleName, string configSection)
         {
             Requested.Add(moduleName);
             return new HttpClient { BaseAddress = new Uri("http://localhost") };
         }
+    }
+
+    private sealed class StubEndpointResolver : IWorkerEndpointResolver
+    {
+        public bool Running { get; set; }
+        public int UnavailableChecks { get; set; } = int.MaxValue;
+        public int ReadinessChecks { get; private set; }
+
+        public WorkerEndpoint GetEndpoint(string name) => new(UnixSocketTransport.TransportName, "/tmp/test.sock");
+
+        public bool IsRunning(string name)
+        {
+            ReadinessChecks++;
+            return Running || ReadinessChecks > UnavailableChecks;
+        }
+    }
+
+    private sealed class CallbackHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            return send(request, cancellationToken);
+        }
+    }
+
+    private sealed class TrackingHandler : HttpMessageHandler
+    {
+        public bool Disposed { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = disposing;
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class FixedClientFactory(HttpClient client) : IWorkerClientFactory
+    {
+        public HttpClient Create(string moduleName, string configSection) => client;
     }
 
     // Exits right away so StartAsync fails after the options were recorded.

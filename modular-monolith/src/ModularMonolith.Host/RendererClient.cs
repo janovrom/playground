@@ -9,7 +9,7 @@ internal interface IRendererClient
     Task<string> RenderPageAsync(GridSettings settings, string svg, CancellationToken cancellationToken);
 }
 
-internal sealed class RendererClient(HttpClient httpClient) : IRendererClient
+internal sealed class RendererClient(HttpClient httpClient) : IRendererClient, IDisposable
 {
     public async Task<string> RenderSvgAsync(GridSettings settings, CancellationToken cancellationToken)
     {
@@ -28,6 +28,8 @@ internal sealed class RendererClient(HttpClient httpClient) : IRendererClient
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsStringAsync(cancellationToken);
     }
+
+    public void Dispose() => httpClient.Dispose();
 }
 
 internal interface IImageCacheClient
@@ -36,7 +38,7 @@ internal interface IImageCacheClient
     Task PutAsync(string key, byte[] svg, CancellationToken cancellationToken);
 }
 
-internal sealed class ImageCacheClient(HttpClient httpClient) : IImageCacheClient
+internal sealed class ImageCacheClient(HttpClient httpClient) : IImageCacheClient, IDisposable
 {
     public async Task<byte[]?> GetAsync(string key, CancellationToken cancellationToken)
     {
@@ -57,4 +59,6 @@ internal sealed class ImageCacheClient(HttpClient httpClient) : IImageCacheClien
         using var response = await httpClient.PutAsync($"/images/{Uri.EscapeDataString(key)}", content, cancellationToken);
         response.EnsureSuccessStatusCode();
     }
+
+    public void Dispose() => httpClient.Dispose();
 }

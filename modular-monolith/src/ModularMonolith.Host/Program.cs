@@ -18,6 +18,7 @@ builder.Services.AddSingleton(PlatformServices.ResolveTransport(builder.Configur
 builder.Services.AddSingleton<RequestDrainTracker>();
 builder.Services.AddSingleton<WorkerManager>();
 builder.Services.AddSingleton<IWorkerEndpointResolver>(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
+builder.Services.AddWorkerHttpResilience();
 builder.Services.AddSingleton<IWorkerClientFactory, WorkerClientFactory>();
 builder.Services.AddHostModule<SvgRendererHostModule>();
 builder.Services.AddHostModule<ImageCacheHostModule>();

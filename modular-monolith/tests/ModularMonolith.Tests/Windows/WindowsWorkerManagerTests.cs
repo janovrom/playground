@@ -38,24 +38,38 @@ public sealed class WindowsWorkerManagerTests
             configuration,
             NullLogger<WorkerManager>.Instance,
             new RequestDrainTracker());
+        using var clients = new WorkerClientTestServices(manager, transport, configuration);
         var stopped = false;
 
         try
         {
             await manager.StartAsync(CancellationToken.None);
 
-            using (var client = transport.CreateHttpClient(manager.GetEndpoint(ModuleCatalog.SvgRenderer)))
-            {
-                using var response = await client.GetAsync("/health");
-                response.EnsureSuccessStatusCode();
-            }
+            var renderer = clients.GetRequiredService<IRendererClient>();
+            var settings = new GridSettings(2, GridPattern.Checkerboard);
+            Assert.Contains("<svg", await renderer.RenderSvgAsync(settings, CancellationToken.None));
 
             var originalProcessId = Assert.Single(manager.GetStatus(), status => status.Name == ModuleCatalog.SvgRenderer).ProcessId;
             Assert.NotNull(originalProcessId);
+            var burst = Enumerable.Range(0, 20).Select(async _ =>
+            {
+                try
+                {
+                    await renderer.RenderSvgAsync(settings, CancellationToken.None);
+                }
+                catch (HttpRequestException)
+                {
+                }
+                catch (TaskCanceledException)
+                {
+                }
+            }).ToArray();
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
             using (var crashed = Process.GetProcessById(originalProcessId.Value))
             {
                 crashed.Kill();
             }
+            await Task.WhenAll(burst);
 
             var timeout = Stopwatch.StartNew();
             WorkerStatus rendererStatus;
@@ -69,6 +83,8 @@ public sealed class WindowsWorkerManagerTests
             Assert.Equal("Running", rendererStatus.State);
             Assert.Equal(1, rendererStatus.RestartCount);
             Assert.NotEqual(originalProcessId, rendererStatus.ProcessId);
+            var recovered = await renderer.RenderSvgAsync(settings, CancellationToken.None);
+            Assert.Contains("<svg", recovered);
 
             var processIds = manager.GetStatus().Select(status => status.ProcessId!.Value).ToArray();
             var stopWatch = Stopwatch.StartNew();

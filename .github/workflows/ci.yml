@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -15,6 +16,12 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
+      - name: Record checked-out revision
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          git rev-parse HEAD | Set-Content TestResults/checkout-sha.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
@@ -25,8 +32,24 @@ jobs:
       # Windows-only tests are skipped on Linux and run for real on Windows.
       - name: Test
         run: dotnet test modular-monolith/ModularMonolith.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+      - name: Verify test reports
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem TestResults -Filter *.trx -Recurse)
+          if ($reports.Count -eq 0) { throw "No TRX test reports were produced." }
+          $total = 0
+          foreach ($report in $reports) {
+            [xml] $result = Get-Content -Raw $report.FullName
+            $counters = $result.TestRun.ResultSummary.Counters
+            if ($null -eq $counters -or [int]$counters.total -le 0) {
+              throw "Test report $($report.FullName) contains no tests."
+            }
+            $total += [int]$counters.total
+          }
+          Write-Host "Verified $total test results in $($reports.Count) report(s)."
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-${{ matrix.os }}
           path: TestResults
+          if-no-files-found: error
