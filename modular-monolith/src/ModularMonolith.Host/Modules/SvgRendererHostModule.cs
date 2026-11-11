@@ -18,7 +18,7 @@ internal sealed class SvgRendererHostModule : IHostModule
     public void ConfigureServices(IServiceCollection services)
     {
         services.AddSingleton(serviceProvider =>
-            new RendererClient(serviceProvider.GetRequiredService<IWorkerClientFactory>().Create(Name)));
+            new RendererClient(serviceProvider.GetRequiredService<IWorkerClientFactory>().Create(Name, ConfigSection)));
         services.AddSingleton<IRendererClient>(serviceProvider => serviceProvider.GetRequiredService<RendererClient>());
     }
 }

@@ -52,7 +52,10 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
             {
                 worker.Endpoint = _endpointAllocator.Allocate(worker.Name);
                 worker.Process = Launch(worker);
-                worker.State = "Starting";
+                lock (_gate)
+                {
+                    worker.State = "Starting";
+                }
             }
 
             await Task.WhenAll(_workers.Values.Select(worker => WaitUntilReadyAsync(worker, cancellationToken)));
@@ -61,9 +64,12 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
         {
             foreach (var worker in _workers.Values)
             {
-                worker.Process?.Dispose();
-                worker.Process = null;
-                worker.State = "Stopped";
+                lock (_gate)
+                {
+                    worker.Process?.Dispose();
+                    worker.Process = null;
+                    worker.State = "Stopped";
+                }
             }
 
             ReleaseEndpoints();
@@ -72,7 +78,11 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
 
         foreach (var worker in _workers.Values)
         {
-            worker.State = "Running";
+            lock (_gate)
+            {
+                worker.State = "Running";
+            }
+
             _logger.LogInformation("Worker {WorkerName} is ready with pid {ProcessId}.", worker.Name, worker.Process!.ProcessId);
         }
 
@@ -148,9 +158,12 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
 
         foreach (var worker in _workers.Values)
         {
-            worker.Process?.Dispose();
-            worker.Process = null;
-            worker.State = "Stopped";
+            lock (_gate)
+            {
+                worker.Process?.Dispose();
+                worker.Process = null;
+                worker.State = "Stopped";
+            }
         }
 
         ReleaseEndpoints();
@@ -174,6 +187,16 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
             return _workers.TryGetValue(name, out var worker) && worker.Endpoint is not null
                 ? worker.Endpoint
                 : throw new InvalidOperationException($"Worker endpoint for '{name}' is not configured.");
+        }
+    }
+
+    public bool IsRunning(string name)
+    {
+        lock (_gate)
+        {
+            return _workers.TryGetValue(name, out var worker)
+                ? worker.State == "Running"
+                : throw new InvalidOperationException($"Worker '{name}' is not registered.");
         }
     }
 
