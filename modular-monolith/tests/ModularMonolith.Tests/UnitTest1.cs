@@ -39,14 +39,9 @@ public class LinuxProcessGuardTests
         }
     }
 
-    [Fact]
+    [LinuxFact]
     public void Launch_ShouldConfigureDedicatedCgroupAndAssignWorkerProcess()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
         var cgroupRoot = Path.Combine(Path.GetTempPath(), $"modular-monolith-{Guid.NewGuid():N}");
         Directory.CreateDirectory(cgroupRoot);
         File.WriteAllText(Path.Combine(cgroupRoot, "cgroup.controllers"), "memory cpu pids\n");

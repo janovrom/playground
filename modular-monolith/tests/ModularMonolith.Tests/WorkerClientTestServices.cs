@@ -2,7 +2,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ModularMonolith.Host;
 using ModularMonolith.Host.Modules;
+using ModularMonolith.Contracts;
+using ModularMonolith.Platform;
 using ModularMonolith.Platform.Transport;
+using System.Security.Claims;
 
 namespace ModularMonolith.Tests;
 
@@ -21,10 +24,29 @@ internal sealed class WorkerClientTestServices : IDisposable
         services.AddSingleton<IWorkerClientFactory, WorkerClientFactory>();
         services.AddHostModule<SvgRendererHostModule>();
         services.AddHostModule<ImageCacheHostModule>();
+        var codec = new WorkerInternalContext(manager.SigningKey);
+        services.AddHttpClient(ModuleCatalog.SvgRenderer)
+            .AddHttpMessageHandler(() => new FixedWorkerContextHandler(codec));
+        services.AddHttpClient(ModuleCatalog.ImageCache)
+            .AddHttpMessageHandler(() => new FixedWorkerContextHandler(codec));
         _provider = services.BuildServiceProvider();
     }
 
     public T GetRequiredService<T>() where T : notnull => _provider.GetRequiredService<T>();
 
     public void Dispose() => _provider.Dispose();
+
+    private sealed class FixedWorkerContextHandler(WorkerInternalContext codec) : DelegatingHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            request.Headers.Remove(WorkerInternalContextConstants.HeaderName);
+            request.Headers.TryAddWithoutValidation(
+                WorkerInternalContextConstants.HeaderName,
+                codec.Encode(new ClaimsPrincipal(new ClaimsIdentity()), []));
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
 }

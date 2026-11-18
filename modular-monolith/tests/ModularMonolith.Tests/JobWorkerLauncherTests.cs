@@ -127,14 +127,9 @@ public sealed class JobWorkerLauncherTests
         Assert.Equal(1, Assert.Single(factory.Jobs).TerminateCount);
     }
 
-    [Fact]
+    [LinuxFact]
     public void CgroupJobFactory_WritesUnlimitedAsMax()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
         var cgroupRoot = Path.Combine(Path.GetTempPath(), $"modular-monolith-{Guid.NewGuid():N}");
         Directory.CreateDirectory(cgroupRoot);
         File.WriteAllText(Path.Combine(cgroupRoot, "cgroup.controllers"), "memory cpu pids\n");

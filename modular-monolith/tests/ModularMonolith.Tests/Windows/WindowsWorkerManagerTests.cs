@@ -34,7 +34,7 @@ public sealed class WindowsWorkerManagerTests
         var manager = new WorkerManager(
             new JobWorkerLauncher(new WindowsJobFactory(), new NamedEventStopStrategy()),
             transport,
-            [new SvgRendererHostModule(), new ImageCacheHostModule()],
+            HostModuleCatalog.FromAdapters([new SvgRendererHostModule(), new ImageCacheHostModule()]),
             configuration,
             NullLogger<WorkerManager>.Instance,
             new RequestDrainTracker());

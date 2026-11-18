@@ -3,6 +3,9 @@ using ModularMonolith.Contracts;
 using ModularMonolith.Host;
 using ModularMonolith.Host.Modules;
 using ModularMonolith.Platform;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Yarp.ReverseProxy.Configuration;
+using Yarp.ReverseProxy.Forwarder;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddPlatformSettings(PlatformServices.Name);
@@ -16,18 +19,30 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddSingleton(PlatformServices.CreateLauncher(builder.Configuration));
 builder.Services.AddSingleton(PlatformServices.ResolveTransport(builder.Configuration));
 builder.Services.AddSingleton<RequestDrainTracker>();
+builder.Services.AddSingleton(WorkerSigningKey.Create());
+builder.Services.AddSingleton<WorkerInternalContext>();
 builder.Services.AddSingleton<WorkerManager>();
+builder.Services.AddSingleton<IWorkerRoutingSource>(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
 builder.Services.AddSingleton<IWorkerEndpointResolver>(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
 builder.Services.AddWorkerHttpResilience();
 builder.Services.AddSingleton<IWorkerClientFactory, WorkerClientFactory>();
-builder.Services.AddHostModule<SvgRendererHostModule>();
-builder.Services.AddHostModule<ImageCacheHostModule>();
+builder.Services.AddHostModule<SvgRendererHostModule, SvgRendererModuleDeclaration>();
+builder.Services.AddHostModule<ImageCacheHostModule, ImageCacheModuleDeclaration>();
+builder.Services.AddSingleton<IHostModuleCatalog>(serviceProvider =>
+    new HostModuleCatalog(serviceProvider.GetServices<HostModuleDescriptor>()));
 builder.Services.AddSingleton<IGridImageProvider, CachedGridImageProvider>();
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
+builder.Services.AddReverseProxy();
+builder.Services.AddSingleton<IForwarderHttpClientFactory, WorkerForwarderHttpClientFactory>();
+builder.Services.RemoveAll<IProxyConfigProvider>();
+builder.Services.AddSingleton<WorkerProxyConfigProvider>();
+builder.Services.AddSingleton<IProxyConfigProvider>(serviceProvider => serviceProvider.GetRequiredService<WorkerProxyConfigProvider>());
 
 var app = builder.Build();
 app.UseExceptionHandler();
+app.UseMiddleware<HostInternalContextMiddleware>();
 app.UseMiddleware<RequestDrainMiddleware>();
+app.UseMiddleware<WorkerProxyFailureMiddleware>();
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", platform = PlatformServices.Name, pid = Environment.ProcessId }))
     .WithSummary("Check the Host health");
@@ -84,6 +99,8 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
+app.MapReverseProxy();
 
 PlatformServices.CreateProcessGuard().EnsureKillOnParentExit();
 

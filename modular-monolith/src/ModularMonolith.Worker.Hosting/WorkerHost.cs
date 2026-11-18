@@ -14,6 +14,7 @@ public static class WorkerHost
 {
     private const string ShutdownEventKey = "Worker:ShutdownEvent";
 
+    /// <summary>Configures and runs the worker module over its private transport endpoint.</summary>
     public static async Task RunAsync(string[] args, IWorkerModule module, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -24,6 +25,7 @@ public static class WorkerHost
         await module.ConfigureServicesAsync(builder, cancellationToken);
 
         var app = builder.Build();
+        app.UseMiddleware<WorkerInternalContextMiddleware>();
         app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
         module.MapEndpoints(app);
 
@@ -50,6 +52,15 @@ public static class WorkerHost
 
         builder.Services.AddSingleton(new WorkerEndpointCleanup(transport, endpoint));
         builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WorkerEndpointCleanup>());
+        var signingKey = Environment.GetEnvironmentVariable(WorkerInternalContextConstants.SigningKeyEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(signingKey))
+        {
+            throw new InvalidOperationException(
+                $"{WorkerInternalContextConstants.SigningKeyEnvironmentVariable} is required.");
+        }
+
+        builder.Services.AddSingleton(WorkerSigningKey.FromBase64(signingKey));
+        builder.Services.AddSingleton<WorkerInternalContext>();
 
         var shutdownEvent = builder.Configuration[ShutdownEventKey];
         if (!string.IsNullOrWhiteSpace(shutdownEvent))

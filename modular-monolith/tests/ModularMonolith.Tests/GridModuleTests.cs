@@ -167,14 +167,9 @@ public sealed class GridModuleTests
         await drained;
     }
 
-    [Fact]
+    [LinuxFact]
     public async Task WorkerProcess_StopAsync_AllowsSigtermHandlerToExit()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
         using var worker = new LocalWorkerLauncher(new SigTermStopStrategy()).Launch(new WorkerLaunchOptions(
             "sigterm-test",
             "/bin/sh",
@@ -187,14 +182,9 @@ public sealed class GridModuleTests
         Assert.Equal(23, worker.ExitCode);
     }
 
-    [Fact]
+    [LinuxFact]
     public async Task WorkerProcess_StopAsync_KillsWorkerThatIgnoresSigterm()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
         using var worker = new LocalWorkerLauncher(new SigTermStopStrategy()).Launch(new WorkerLaunchOptions(
             "sigterm-ignore-test",
             "/bin/sh",
@@ -205,14 +195,9 @@ public sealed class GridModuleTests
         Assert.True(worker.HasExited);
     }
 
-    [Fact]
+    [LinuxFact]
     public async Task WorkerManager_CleansSocketAfterCrashAndRestartsAfterSignals()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
         var directory = Directory.CreateTempSubdirectory("worker-supervisor-test-");
         var rendererPath = Path.Combine(AppContext.BaseDirectory, "ModularMonolith.Worker.SvgRenderer.dll");
         var cachePath = Path.Combine(AppContext.BaseDirectory, "ModularMonolith.Worker.ImageCache.dll");
@@ -231,7 +216,7 @@ public sealed class GridModuleTests
         var manager = new WorkerManager(
             new LocalWorkerLauncher(new SigTermStopStrategy()),
             transport,
-            [new SvgRendererHostModule(), new ImageCacheHostModule()],
+            HostModuleCatalog.FromAdapters([new SvgRendererHostModule(), new ImageCacheHostModule()]),
             configuration,
             NullLogger<WorkerManager>.Instance,
             new RequestDrainTracker());

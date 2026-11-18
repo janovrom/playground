@@ -85,7 +85,8 @@ All OS-specific features are abstracted through cross-platform contracts in `Mod
 
 ### Tier 1: Host Orchestrator & Gateway Edge
 The Host process serves as the sole public entry point, security boundary, and lifecycle supervisor for all workers.
-* **Gateway Routing**: Manages incoming requests, caches, and routes requests to appropriate module endpoints via private IPC.
+* **Gateway Routing**: YARP routes declared worker paths over private UDS or Named Pipe transports. Worker readiness controls destination availability, and unavailable clusters return a problem-details HTTP 503 response.
+* **Gateway Security Context**: The Host replaces external internal-context headers with a short-lived HMAC-signed payload. Only configured `HttpContext.User` claim types are forwarded. Each Host run passes a 256-bit key to child workers through an environment variable.
 * **Worker Lifecycle Supervisor (`WorkerManager`)**: Launches workers with allocated transport endpoints and resource limits, monitors child exit status, cleans up stale transport artifacts, and restarts failed processes with exponential backoff (1s to 30s).
 * **Request Drain Gate (`RequestDrainTracker`)**: Tracks in-flight public HTTP requests. During host termination, it rejects new ingress requests (HTTP 503) and ensures active requests complete before workers are stopped.
 
@@ -97,7 +98,8 @@ Each worker process executes within a sandboxed kernel container.
 ### Tier 3: Domain Modules & High-Performance IPC
 Each module implements cohesive vertical domain logic:
 * **Worker Side (`IWorkerModule`)**: Configures internal dependency injection (`ConfigureServicesAsync`) and registers endpoints (`MapEndpoints`).
-* **Host Side (`IHostModule`)**: Defines module identity, worker project name, configuration section, default resource limits, command-line arguments, and registers typed API clients in Host DI.
+* **Shared Declaration**: Defines stable module identity and proxy routes in a shared assembly.
+* **Host Side (`IHostModule` adapter)**: Supplies process-specific resource and client registration inputs for the current manual catalog. BL-0003 can replace this adapter with generated `HostModuleDescriptor` registrations.
 * **Serialization & Contracts (`ModularMonolith.Contracts`)**: Pure DTOs and contracts shared between Host and modules without web or infrastructure dependencies.
 
 ### Tier 4: Resilience & Circuit Breaking
@@ -114,7 +116,7 @@ Protects the Host from cascading failures and crash-looping workers:
 |---|---|
 | **Host Orchestrator** | The parent ASP.NET Core process (`ModularMonolith.Host`) running as a daemon or service. It manages ingress traffic, routing, and child process lifecycles. |
 | **Worker Process** | An independent operating system child process executing a compiled worker binary (e.g., `ModularMonolith.Worker.SvgRenderer`). |
-| **Module** | A cohesive functional unit composed of a worker-side implementation (`IWorkerModule`), a host-side registration (`IHostModule`), and shared contracts. |
+| **Module** | A cohesive functional unit composed of a shared declaration, a worker-side implementation (`IWorkerModule`), a Host registration adapter or generated descriptor, and shared contracts. |
 | **Resource Container (`IJob`)** | A kernel-level governance container (`CgroupJob` on Linux, `WindowsJob` on Windows) enforcing memory, CPU, and process count limits on child processes. |
 | **Process Guard (`IProcessGuard`)** | A kernel mechanism ensuring child worker processes are killed immediately if the parent Host process dies unexpectedly. |
 | **Transport (`IWorkerTransport`)** | An IPC communication mechanism abstracting socket creation, Kestrel binding, HttpClient client handler configuration, and endpoint cleanup. |
@@ -127,7 +129,7 @@ Protects the Host from cascading failures and crash-looping workers:
 
 | Capability / Component | Shipped Implementation (Today) | Target Architecture (Backlog) | Tracking Item |
 |---|---|---|---|
-| **Gateway Routing** | Manual route mapping in `Program.cs` + typed HTTP clients | YARP dynamic reverse proxy over UDS/Named Pipes | `BL-0002` |
+| **Gateway Routing** | YARP dynamic reverse proxy over UDS/Named Pipes plus existing typed Host-client composition | Future generated module registration and circuit breaking | `BL-0002`, `BL-0003`, `BL-0005` |
 | **Transport Resilience** | Microsoft HTTP resilience pipeline (two bounded jittered retries), per-worker timeouts, and lifecycle readiness gating | Circuit breaking and additional connection-pool controls | `BL-0001`, `BL-0005` |
 | **Module Code Generation** | Manual `IHostModule` + `IWorkerModule` implementations | Roslyn `WorkerSourceGenerator` for compile-time wiring | `BL-0003` |
 | **Build & Packaging** | MSBuild targets copying outputs into `workers/` | Unified worker project & single-installer pipeline | `BL-0004` |

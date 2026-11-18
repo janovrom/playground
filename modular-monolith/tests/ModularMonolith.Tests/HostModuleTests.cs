@@ -7,6 +7,7 @@ using ModularMonolith.Contracts;
 using ModularMonolith.Host;
 using ModularMonolith.Host.Modules;
 using ModularMonolith.Platform.Transport;
+using ModularMonolith.Platform;
 
 namespace ModularMonolith.Tests;
 
@@ -42,6 +43,10 @@ public sealed class HostModuleTests
         var endpointArgument = Assert.Single(launch.Arguments, argument => argument.StartsWith("--Worker:Endpoint=", StringComparison.Ordinal));
         Assert.EndsWith("alpha.sock", endpointArgument);
         Assert.Equal(new JobLimits(MemoryMaxBytes: 64L * 1024 * 1024, MemoryHighBytes: 96L * 1024 * 1024, CpuCores: 1.5, MaxProcesses: 10), launch.Limits);
+        var signingKey = Assert.Single(launch.Environment!);
+        Assert.Equal(WorkerInternalContextConstants.SigningKeyEnvironmentVariable, signingKey.Key);
+        Assert.Equal(32, Convert.FromBase64String(signingKey.Value).Length);
+        Assert.DoesNotContain(launch.Arguments!, argument => argument.Contains(signingKey.Value, StringComparison.Ordinal));
 
         var endpointDirectory = Path.GetDirectoryName(endpointArgument["--Worker:Endpoint=".Length..])!;
         Assert.False(Directory.Exists(endpointDirectory), "A failed start must release the temporary endpoint directory.");
@@ -302,7 +307,13 @@ public sealed class HostModuleTests
     }
 
     private static WorkerManager CreateManager(IConfiguration configuration, IWorkerLauncher launcher, params IHostModule[] modules)
-        => new(launcher, new UnixSocketTransport(), modules, configuration, NullLogger<WorkerManager>.Instance, new RequestDrainTracker());
+        => new(
+            launcher,
+            new UnixSocketTransport(),
+            HostModuleCatalog.FromAdapters(modules),
+            configuration,
+            NullLogger<WorkerManager>.Instance,
+            new RequestDrainTracker());
 
     private static IConfiguration Configuration(params (string Key, string Value)[] values)
         => new ConfigurationBuilder()

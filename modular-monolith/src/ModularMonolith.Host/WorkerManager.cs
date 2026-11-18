@@ -3,13 +3,24 @@ using System.Net.Sockets;
 using Microsoft.Extensions.Hosting;
 using ModularMonolith.Abstractions;
 using ModularMonolith.Host.Modules;
+using ModularMonolith.Platform;
 using ModularMonolith.Platform.Transport;
 
 namespace ModularMonolith.Host;
 
 internal sealed record WorkerStatus(string Name, int? ProcessId, string State, int RestartCount);
+internal sealed record WorkerRoutingSnapshot(string Name, WorkerEndpoint? Endpoint, bool IsReady, string Revision);
 
-internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
+internal interface IWorkerRoutingSource
+{
+    /// <summary>Occurs when a worker destination or readiness state changes.</summary>
+    event EventHandler<IReadOnlyList<WorkerRoutingSnapshot>>? TopologyChanged;
+
+    /// <summary>Returns the current destination and readiness state for all workers.</summary>
+    IReadOnlyList<WorkerRoutingSnapshot> GetRoutingSnapshot();
+}
+
+internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, IWorkerRoutingSource
 {
     private static readonly TimeSpan MinimumRestartDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaximumRestartDelay = TimeSpan.FromSeconds(30);
@@ -19,29 +30,36 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
     private readonly IConfiguration _configuration;
     private readonly ILogger<WorkerManager> _logger;
     private readonly RequestDrainTracker _requestDrainTracker;
+    private readonly WorkerSigningKey _signingKey;
     private readonly Dictionary<string, ManagedWorker> _workers;
     private readonly object _gate = new();
     private readonly List<Task> _supervisors = [];
     private CancellationTokenSource? _supervisorCancellation;
     private IEndpointAllocator? _endpointAllocator;
     private int _stopping;
+    public event EventHandler<IReadOnlyList<WorkerRoutingSnapshot>>? TopologyChanged;
+
+    internal WorkerSigningKey SigningKey => _signingKey;
 
     public WorkerManager(
         IWorkerLauncher workerLauncher,
         IWorkerTransport transport,
-        IEnumerable<IHostModule> modules,
+        IHostModuleCatalog modules,
         IConfiguration configuration,
         ILogger<WorkerManager> logger,
-        RequestDrainTracker requestDrainTracker)
+        RequestDrainTracker requestDrainTracker,
+        WorkerSigningKey? signingKey = null)
     {
         _workerLauncher = workerLauncher;
         _transport = transport;
         _configuration = configuration;
         _logger = logger;
         _requestDrainTracker = requestDrainTracker;
-        _workers = modules.Select(CreateDefinition).ToDictionary(worker => worker.Name, StringComparer.Ordinal);
+        _signingKey = signingKey ?? WorkerSigningKey.Create();
+        _workers = modules.Modules.Select(CreateDefinition).ToDictionary(worker => worker.Name, StringComparer.Ordinal);
     }
 
+    /// <summary>Allocates endpoints, starts every registered worker, and waits for readiness.</summary>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _endpointAllocator = _transport.CreateAllocator(_configuration);
@@ -56,6 +74,7 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
                 {
                     worker.State = "Starting";
                 }
+                PublishTopologyChanged();
             }
 
             await Task.WhenAll(_workers.Values.Select(worker => WaitUntilReadyAsync(worker, cancellationToken)));
@@ -73,6 +92,7 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
             }
 
             ReleaseEndpoints();
+            PublishTopologyChanged();
             throw;
         }
 
@@ -84,6 +104,7 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
             }
 
             _logger.LogInformation("Worker {WorkerName} is ready with pid {ProcessId}.", worker.Name, worker.Process!.ProcessId);
+            PublishTopologyChanged();
         }
 
         _supervisorCancellation = new CancellationTokenSource();
@@ -93,6 +114,7 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
         }
     }
 
+    /// <summary>Drains requests, stops every worker, and releases allocated endpoints.</summary>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         if (Interlocked.Exchange(ref _stopping, 1) != 0)
@@ -126,6 +148,7 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
                 worker.State = "Stopping";
             }
         }
+        PublishTopologyChanged();
 
         var remainingGrace = gracePeriod - stopwatch.Elapsed;
         if (remainingGrace < TimeSpan.Zero)
@@ -164,12 +187,14 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
                 worker.Process = null;
                 worker.State = "Stopped";
             }
+            PublishTopologyChanged();
         }
 
         ReleaseEndpoints();
         _supervisorCancellation?.Dispose();
     }
 
+    /// <summary>Returns a point-in-time process status for every registered worker.</summary>
     public IReadOnlyList<WorkerStatus> GetStatus()
     {
         lock (_gate)
@@ -180,6 +205,7 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
         }
     }
 
+    /// <summary>Returns the current IPC endpoint for one registered worker.</summary>
     public WorkerEndpoint GetEndpoint(string name)
     {
         lock (_gate)
@@ -190,6 +216,7 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
         }
     }
 
+    /// <summary>Reports whether one registered worker is ready to receive requests.</summary>
     public bool IsRunning(string name)
     {
         lock (_gate)
@@ -200,13 +227,33 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
         }
     }
 
-    private ManagedWorker CreateDefinition(IHostModule module)
+    /// <summary>Returns the routing state used to rebuild YARP configuration.</summary>
+    public IReadOnlyList<WorkerRoutingSnapshot> GetRoutingSnapshot()
+    {
+        lock (_gate)
+        {
+            return _workers.Values
+                .Select(worker => new WorkerRoutingSnapshot(
+                    worker.Name,
+                    worker.Endpoint,
+                    worker.State == "Running",
+                    $"{worker.RestartCount}:{worker.State}:{worker.Endpoint?.Address ?? "none"}"))
+                .ToArray();
+        }
+    }
+
+    private ManagedWorker CreateDefinition(HostModuleDescriptor module)
     {
         var section = _configuration.GetSection($"Workers:{module.ConfigSection}");
         var (executable, arguments) = WorkerCommandResolver.Resolve(section, module.WorkerProject, AppContext.BaseDirectory);
         arguments.AddRange(module.GetWorkerArguments(_configuration));
 
         return new ManagedWorker(module.Name, executable, arguments, ReadLimits(section.GetSection("Limits"), module.DefaultLimits));
+    }
+
+    private void PublishTopologyChanged()
+    {
+        TopologyChanged?.Invoke(this, GetRoutingSnapshot());
     }
 
     private static JobLimits ReadLimits(IConfigurationSection section, JobLimits defaults)
@@ -228,7 +275,15 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
         var arguments = worker.Arguments
             .Concat([$"--Worker:Transport={endpoint.Transport}", $"--Worker:Endpoint={endpoint.Address}"])
             .ToArray();
-        return _workerLauncher.Launch(new WorkerLaunchOptions(worker.Name, worker.ExecutablePath, arguments, worker.Limits));
+        return _workerLauncher.Launch(new WorkerLaunchOptions(
+            worker.Name,
+            worker.ExecutablePath,
+            arguments,
+            worker.Limits,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [WorkerInternalContextConstants.SigningKeyEnvironmentVariable] = _signingKey.ToBase64()
+            }));
     }
 
     private async Task WaitUntilReadyAsync(ManagedWorker worker, CancellationToken cancellationToken)
@@ -308,8 +363,13 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
                 worker.State = "Restarting";
                 worker.RestartCount++;
             }
+            PublishTopologyChanged();
 
             RemoveStaleEndpoint(worker);
+            lock (_gate)
+            {
+                worker.Endpoint = _endpointAllocator!.Allocate(worker.Name);
+            }
             process.Dispose();
             var delayBeforeRestart = restartDelay;
             restartDelay = TimeSpan.FromSeconds(Math.Min(restartDelay.TotalSeconds * 2, MaximumRestartDelay.TotalSeconds));
@@ -339,12 +399,14 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver
                         worker.Process = processToStart;
                         worker.State = "Starting";
                     }
+                    PublishTopologyChanged();
 
                     await WaitUntilReadyAsync(worker, cancellationToken);
                     lock (_gate)
                     {
                         worker.State = "Running";
                     }
+                    PublishTopologyChanged();
 
                     _logger.LogInformation("Worker {WorkerName} restarted with pid {ProcessId}.", worker.Name, processToStart.ProcessId);
                     break;
