@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModularMonolith.Contracts;
 using ModularMonolith.Platform;
 using ModularMonolith.Platform.Transport;
 
@@ -46,7 +47,7 @@ public static class WorkerHost
         builder.WebHost.ConfigureKestrel(options => transport.Listen(options, endpoint));
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(8));
         builder.Services.ConfigureHttpJsonOptions(options =>
-            options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+            options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GridPattern>()));
 
         PlatformServices.CreateProcessGuard().EnsureKillOnParentExit();
 

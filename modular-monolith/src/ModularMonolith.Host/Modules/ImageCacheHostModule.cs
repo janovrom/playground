@@ -5,14 +5,19 @@ namespace ModularMonolith.Host.Modules;
 
 internal sealed class ImageCacheHostModule : IHostModule
 {
+    /// <summary>Gets the stable worker module name.</summary>
     public string Name => ModuleCatalog.ImageCache;
 
+    /// <summary>Gets the worker project name used to locate its executable.</summary>
     public string WorkerProject => "ModularMonolith.Worker.ImageCache";
 
+    /// <summary>Gets the configuration section used for client options.</summary>
     public string ConfigSection => "ImageCache";
 
+    /// <summary>Gets the default resource limits for the worker.</summary>
     public JobLimits DefaultLimits => new();
 
+    /// <summary>Builds the database path argument passed to the worker.</summary>
     public IEnumerable<string> GetWorkerArguments(IConfiguration configuration)
     {
         var databasePath = configuration["ImageCache:DatabasePath"];
@@ -27,10 +32,6 @@ internal sealed class ImageCacheHostModule : IHostModule
         yield return $"--ImageCache:DatabasePath={databasePath}";
     }
 
-    public void ConfigureServices(IServiceCollection services)
-    {
-        services.AddSingleton(serviceProvider =>
-            new ImageCacheClient(serviceProvider.GetRequiredService<IWorkerClientFactory>().Create(Name, ConfigSection)));
-        services.AddSingleton<IImageCacheClient>(serviceProvider => serviceProvider.GetRequiredService<ImageCacheClient>());
-    }
+    /// <summary>Leaves cache DI registration to the generated client registration.</summary>
+    public void ConfigureServices(IServiceCollection services) { }
 }

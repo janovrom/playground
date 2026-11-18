@@ -98,9 +98,20 @@ Each worker process executes within a sandboxed kernel container.
 ### Tier 3: Domain Modules & High-Performance IPC
 Each module implements cohesive vertical domain logic:
 * **Worker Side (`IWorkerModule`)**: Configures internal dependency injection (`ConfigureServicesAsync`) and registers endpoints (`MapEndpoints`).
-* **Shared Declaration**: Defines stable module identity and proxy routes in a shared assembly.
-* **Host Side (`IHostModule` adapter)**: Supplies process-specific resource and client registration inputs for the current manual catalog. BL-0003 can replace this adapter with generated `HostModuleDescriptor` registrations.
-* **Serialization & Contracts (`ModularMonolith.Contracts`)**: Pure DTOs and contracts shared between Host and modules without web or infrastructure dependencies.
+* **Shared Declaration**: Defines stable module identity, proxy routes, client operations, and DTOs in a shared assembly.
+* **Generated Wiring (`WorkerSourceGenerator`)**: Creates Host descriptors, typed clients, DI registration, and worker `Main` methods from compile-time metadata.
+* **Host Side (`IHostModule` hook)**: Supplies optional process-specific resource limits and worker arguments. Modules that use defaults do not need a Host hook.
+* **Serialization & Contracts (`ModularMonolith.Contracts`)**: DTOs and explicit `JsonSerializerContext` metadata shared by Host and workers without reflection.
+
+```mermaid
+flowchart LR
+    Contract[Shared module and client metadata] --> Generator[WorkerSourceGenerator]
+    Worker[IWorkerModule implementation] --> Generator
+    Generator --> HostWiring[Generated Host descriptors and clients]
+    Generator --> WorkerMain[Generated worker Main]
+    HostWiring --> Runtime[Existing BL-0002 gateway runtime]
+    WorkerMain --> WorkerHost
+```
 
 ### Tier 4: Resilience & Circuit Breaking
 Protects the Host from cascading failures and crash-looping workers:
@@ -116,7 +127,7 @@ Protects the Host from cascading failures and crash-looping workers:
 |---|---|
 | **Host Orchestrator** | The parent ASP.NET Core process (`ModularMonolith.Host`) running as a daemon or service. It manages ingress traffic, routing, and child process lifecycles. |
 | **Worker Process** | An independent operating system child process executing a compiled worker binary (e.g., `ModularMonolith.Worker.SvgRenderer`). |
-| **Module** | A cohesive functional unit composed of a shared declaration, a worker-side implementation (`IWorkerModule`), a Host registration adapter or generated descriptor, and shared contracts. |
+| **Module** | A cohesive functional unit composed of shared metadata and contracts, a worker-side implementation (`IWorkerModule`), generated Host wiring, and optional Host hooks. |
 | **Resource Container (`IJob`)** | A kernel-level governance container (`CgroupJob` on Linux, `WindowsJob` on Windows) enforcing memory, CPU, and process count limits on child processes. |
 | **Process Guard (`IProcessGuard`)** | A kernel mechanism ensuring child worker processes are killed immediately if the parent Host process dies unexpectedly. |
 | **Transport (`IWorkerTransport`)** | An IPC communication mechanism abstracting socket creation, Kestrel binding, HttpClient client handler configuration, and endpoint cleanup. |
@@ -129,9 +140,9 @@ Protects the Host from cascading failures and crash-looping workers:
 
 | Capability / Component | Shipped Implementation (Today) | Target Architecture (Backlog) | Tracking Item |
 |---|---|---|---|
-| **Gateway Routing** | YARP dynamic reverse proxy over UDS/Named Pipes plus existing typed Host-client composition | Future generated module registration and circuit breaking | `BL-0002`, `BL-0003`, `BL-0005` |
+| **Gateway Routing** | Generated descriptor and client registration feeding the BL-0002 YARP dynamic proxy | Circuit breaking | `BL-0002`, `BL-0003`, `BL-0005` |
 | **Transport Resilience** | Microsoft HTTP resilience pipeline (two bounded jittered retries), per-worker timeouts, and lifecycle readiness gating | Circuit breaking and additional connection-pool controls | `BL-0001`, `BL-0005` |
-| **Module Code Generation** | Manual `IHostModule` + `IWorkerModule` implementations | Roslyn `WorkerSourceGenerator` for compile-time wiring | `BL-0003` |
+| **Module Code Generation** | `WorkerSourceGenerator` emits Host wiring, typed clients, and worker entry points without runtime reflection | Additional metadata and client operation shapes as modules require them | `BL-0003` |
 | **Build & Packaging** | MSBuild targets copying outputs into `workers/` | Unified worker project & single-installer pipeline | `BL-0004` |
 | **Crash Loop Protection** | Exponential backoff restart (1s–30s) | Sliding-window circuit breaker & Poison Pill quarantine | `BL-0005` |
 | **High-Throughput IPC** | Kestrel over UDS / Named Pipes with JSON | Shared Memory (MMF) ring buffer for sub-millisecond streaming | `BL-0006` |

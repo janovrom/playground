@@ -228,8 +228,7 @@ public sealed class HostModuleTests
         var factory = new RecordingClientFactory();
         var services = new ServiceCollection();
         services.AddSingleton<IWorkerClientFactory>(factory);
-        services.AddHostModule<SvgRendererHostModule>();
-        services.AddHostModule<ImageCacheHostModule>();
+        services.AddGeneratedWorkerModules();
         using var provider = services.BuildServiceProvider();
 
         Assert.IsType<RendererClient>(provider.GetRequiredService<IRendererClient>());
@@ -245,7 +244,7 @@ public sealed class HostModuleTests
         var handler = new TrackingHandler();
         var services = new ServiceCollection();
         services.AddSingleton<IWorkerClientFactory>(new FixedClientFactory(new HttpClient(handler)));
-        services.AddHostModule<SvgRendererHostModule>();
+        services.AddGeneratedWorkerModules();
 
         using (var provider = services.BuildServiceProvider())
         {

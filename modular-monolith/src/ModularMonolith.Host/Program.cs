@@ -15,7 +15,8 @@ builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(30));
 builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+    options.SerializerOptions.Converters.Add(
+        new System.Text.Json.Serialization.JsonStringEnumConverter<GridPattern>()));
 builder.Services.AddSingleton(PlatformServices.CreateLauncher(builder.Configuration));
 builder.Services.AddSingleton(PlatformServices.ResolveTransport(builder.Configuration));
 builder.Services.AddSingleton<RequestDrainTracker>();
@@ -26,8 +27,7 @@ builder.Services.AddSingleton<IWorkerRoutingSource>(serviceProvider => servicePr
 builder.Services.AddSingleton<IWorkerEndpointResolver>(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
 builder.Services.AddWorkerHttpResilience();
 builder.Services.AddSingleton<IWorkerClientFactory, WorkerClientFactory>();
-builder.Services.AddHostModule<SvgRendererHostModule, SvgRendererModuleDeclaration>();
-builder.Services.AddHostModule<ImageCacheHostModule, ImageCacheModuleDeclaration>();
+builder.Services.AddGeneratedWorkerModules();
 builder.Services.AddSingleton<IHostModuleCatalog>(serviceProvider =>
     new HostModuleCatalog(serviceProvider.GetServices<HostModuleDescriptor>()));
 builder.Services.AddSingleton<IGridImageProvider, CachedGridImageProvider>();

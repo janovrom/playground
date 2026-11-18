@@ -21,8 +21,7 @@ public sealed class GatewayModuleTests
         services.AddWorkerHttpResilience();
         services.AddSingleton<ModularMonolith.Host.IWorkerClientFactory>(
             new RecordingClientFactory());
-        services.AddHostModule<SvgRendererHostModule, SvgRendererModuleDeclaration>();
-        services.AddHostModule<ImageCacheHostModule, ImageCacheModuleDeclaration>();
+        services.AddGeneratedWorkerModules();
         using var provider = services.BuildServiceProvider();
         var descriptors = provider.GetServices<HostModuleDescriptor>().ToArray();
 
@@ -33,6 +32,18 @@ public sealed class GatewayModuleTests
         Assert.Contains(
             descriptors.SelectMany(module => module.ProxyRoutes),
             route => route.PublicPath == "/images/{**path}" && route.DestinationPath == "/images/{**path}");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ImageCache:DatabasePath"] = "/data/cache.db"
+            })
+            .Build();
+        var imageCache = Assert.Single(descriptors, descriptor => descriptor.Name == ModuleCatalog.ImageCache);
+        var renderer = Assert.Single(descriptors, descriptor => descriptor.Name == ModuleCatalog.SvgRenderer);
+        Assert.Equal(new ImageCacheHostModule().DefaultLimits, imageCache.DefaultLimits);
+        Assert.Equal(["--ImageCache:DatabasePath=/data/cache.db"], imageCache.GetWorkerArguments(configuration));
+        Assert.Equal(new SvgRendererHostModule().DefaultLimits, renderer.DefaultLimits);
+        Assert.Empty(renderer.GetWorkerArguments(configuration));
     }
 
     [Fact]

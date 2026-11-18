@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)generated</CompilerGeneratedFilesOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +19,10 @@
     <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
     <ProjectReference Include="..\ModularMonolith.Contracts\ModularMonolith.Contracts.csproj" />
     <ProjectReference Include="..\ModularMonolith.Platform\ModularMonolith.Platform.csproj" />
+    <ProjectReference Include="..\ModularMonolith.Generators\ModularMonolith.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      GlobalPropertiesToRemove="PublishTrimmed;PublishAot" />
     <ProjectReference Include="..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\ModularMonolith.Contracts\ModularMonolith.Contracts.csproj" />
     <ProjectReference Include="..\ModularMonolith.Platform\ModularMonolith.Platform.csproj" />
   </ItemGroup>
 

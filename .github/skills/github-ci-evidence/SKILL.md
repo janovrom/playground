@@ -59,6 +59,6 @@ alone does not prove that the required tests ran or passed.
    individual test names and outcomes. Only mark an acceptance criterion
    complete when all of its requirements have matching evidence.
 
-The modular-monolith CI workflow produces `test-results-ubuntu-latest` and
+The modular-monolith CI workflow produces `test-results-ubuntu-26.04` and
 `test-results-windows-latest` artifacts containing TRX and checkout SHA files.
 Other projects may use different workflows or report formats.

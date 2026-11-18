@@ -362,7 +362,7 @@ public sealed class GridModuleTests
             return Task.FromResult(Svg);
         }
 
-        public Task<string> RenderPageAsync(GridSettings settings, string svg, CancellationToken cancellationToken)
-            => Task.FromResult($"<html>{svg}</html>");
+        public Task<string> RenderPageAsync(RenderPageRequest request, CancellationToken cancellationToken)
+            => Task.FromResult($"<html>{request.SvgContent}</html>");
     }
 }
