@@ -7,6 +7,7 @@ public sealed class LocalWorkerLauncher(IGracefulStopStrategy? stopStrategy = nu
 {
     private readonly IGracefulStopStrategy _stopStrategy = stopStrategy ?? NoGracefulStopStrategy.Instance;
 
+    /// <summary>Starts a worker process with the supplied launch options.</summary>
     public WorkerProcess Launch(WorkerLaunchOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -41,6 +42,11 @@ internal static class WorkerProcessStarter
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+
+        foreach (var variable in options.Environment ?? new Dictionary<string, string>())
+        {
+            startInfo.Environment[variable.Key] = variable.Value;
         }
 
         return Process.Start(startInfo)

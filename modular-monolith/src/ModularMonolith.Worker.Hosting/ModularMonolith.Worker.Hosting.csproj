@@ -11,4 +11,8 @@
     <ProjectReference Include="..\ModularMonolith.Platform\ModularMonolith.Platform.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ModularMonolith.Tests" />
+  </ItemGroup>
+
 </Project>
