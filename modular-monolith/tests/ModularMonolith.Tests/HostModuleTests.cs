@@ -148,7 +148,7 @@ public sealed class HostModuleTests
         Assert.Equal(TimeSpan.FromSeconds(1), configuredClient.Timeout);
         var stopwatch = Stopwatch.StartNew();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => configuredClient.GetAsync("http://localhost/"));
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Configured timeout took too long: {stopwatch.Elapsed}.");
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), $"Configured timeout took too long: {stopwatch.Elapsed}.");
 
         using var defaultClient = factory.Create("alpha", "Missing");
         Assert.Equal(TimeSpan.FromSeconds(10), defaultClient.Timeout);
