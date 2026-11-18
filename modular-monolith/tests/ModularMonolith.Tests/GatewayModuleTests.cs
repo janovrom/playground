@@ -72,7 +72,9 @@ public sealed class GatewayModuleTests
     {
         var codec = new WorkerInternalContext(WorkerSigningKey.Create());
         var value = codec.Encode(new ClaimsPrincipal(new ClaimsIdentity()), []);
-        var tampered = $"{value[..^1]}{(value[^1] == 'A' ? 'B' : 'A')}";
+        var separator = value.IndexOf('.');
+        var tamperedSignature = $"{(value[separator + 1] == 'A' ? 'B' : 'A')}{value[(separator + 2)..]}";
+        var tampered = $"{value[..(separator + 1)]}{tamperedSignature}";
 
         Assert.Throws<WorkerInternalContextException>(() => codec.Decode(tampered));
     }
