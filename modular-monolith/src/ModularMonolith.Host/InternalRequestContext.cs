@@ -1,5 +1,5 @@
-using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ModularMonolith.Platform;
 
 namespace ModularMonolith.Host;
@@ -35,16 +35,26 @@ internal sealed class WorkerProxyFailureMiddleware(RequestDelegate next)
         }
 
         context.Response.ContentType = "application/problem+json";
-        var body = JsonSerializer.Serialize(new
-        {
-            type = "https://www.rfc-editor.org/rfc/rfc9110#name-503-service-unavailable",
-            title = "Worker unavailable",
-            status = StatusCodes.Status503ServiceUnavailable,
-            detail = "The worker module is unavailable."
-        });
-        await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(body), context.RequestAborted);
+        var body = JsonSerializer.SerializeToUtf8Bytes(
+            new WorkerProxyProblemDetails(
+                "https://www.rfc-editor.org/rfc/rfc9110#name-503-service-unavailable",
+                "Worker unavailable",
+                StatusCodes.Status503ServiceUnavailable,
+                "The worker module is unavailable."),
+            HostJsonContext.Default.WorkerProxyProblemDetails);
+        await context.Response.Body.WriteAsync(body, context.RequestAborted);
     }
 }
+
+internal sealed record WorkerProxyProblemDetails(
+    string Type,
+    string Title,
+    int Status,
+    string Detail);
+
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
+[JsonSerializable(typeof(WorkerProxyProblemDetails))]
+internal partial class HostJsonContext : JsonSerializerContext;
 
 internal sealed class WorkerContextPropagationHandler(IHttpContextAccessor httpContextAccessor) : DelegatingHandler
 {

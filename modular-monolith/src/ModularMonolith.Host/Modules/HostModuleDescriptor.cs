@@ -10,8 +10,46 @@ internal sealed record HostModuleDescriptor(
     string ConfigSection,
     JobLimits DefaultLimits,
     IReadOnlyList<WorkerProxyRouteDescriptor> ProxyRoutes,
-    Func<IConfiguration, IEnumerable<string>> GetWorkerArguments,
-    Action<IServiceCollection> ConfigureServices);
+    Func<IConfiguration, IEnumerable<string>> GetWorkerArguments);
+
+internal static class HostModuleDescriptorComposer
+{
+    /// <summary>Applies registered Host customizations to generated descriptors.</summary>
+    public static IReadOnlyList<HostModuleDescriptor> Compose(
+        IEnumerable<HostModuleDescriptor> descriptors,
+        IEnumerable<IHostModuleCustomization> customizations)
+    {
+        ArgumentNullException.ThrowIfNull(descriptors);
+        ArgumentNullException.ThrowIfNull(customizations);
+        var moduleMap = HostModuleDescriptorValidator.Validate(descriptors)
+            .ToDictionary(descriptor => descriptor.Name, StringComparer.Ordinal);
+        var modules = customizations.ToArray();
+        var duplicate = modules.GroupBy(customization => customization.ModuleName, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+        {
+            throw new InvalidOperationException(
+                $"Host customization for module '{duplicate.Key}' is registered more than once.");
+        }
+
+        foreach (var customization in modules)
+        {
+            if (!moduleMap.TryGetValue(customization.ModuleName, out var descriptor))
+            {
+                throw new InvalidOperationException(
+                    $"Host customization refers to unknown module '{customization.ModuleName}'.");
+            }
+
+            moduleMap[customization.ModuleName] = descriptor with
+            {
+                DefaultLimits = customization.CustomizeLimits(descriptor.DefaultLimits),
+                GetWorkerArguments = customization.GetWorkerArguments
+            };
+        }
+
+        return moduleMap.Values.ToArray();
+    }
+}
 
 internal interface IHostModuleCatalog
 {
@@ -27,20 +65,6 @@ internal sealed class HostModuleCatalog : IHostModuleCatalog
     }
 
     public IReadOnlyList<HostModuleDescriptor> Modules { get; }
-
-    /// <summary>Creates descriptors for tests and legacy manual registrations.</summary>
-    public static HostModuleCatalog FromAdapters(IEnumerable<IHostModule> modules)
-    {
-        ArgumentNullException.ThrowIfNull(modules);
-        return new HostModuleCatalog(modules.Select(module => new HostModuleDescriptor(
-            module.Name,
-            module.WorkerProject,
-            module.ConfigSection,
-            module.DefaultLimits,
-            [],
-            module.GetWorkerArguments,
-            module.ConfigureServices)));
-    }
 }
 
 internal static class HostModuleDescriptorValidator

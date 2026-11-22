@@ -40,6 +40,70 @@ public sealed class WorkerProxyRouteAttribute : Attribute
     public string DestinationPath { get; }
 }
 
+/// <summary>Declares the worker client generated for a module declaration.</summary>
+[AttributeUsage(AttributeTargets.Interface, AllowMultiple = false, Inherited = false)]
+public sealed class WorkerClientAttribute : Attribute
+{
+    /// <summary>Creates client metadata for the named worker module.</summary>
+    public WorkerClientAttribute(string moduleName) => ModuleName = moduleName;
+
+    /// <summary>Gets the module name used to resolve the declaration and client configuration.</summary>
+    public string ModuleName { get; }
+}
+
+/// <summary>Identifies how a worker client serializes an operation request.</summary>
+public enum WorkerRequestKind
+{
+    None,
+    Json,
+    Bytes
+}
+
+/// <summary>Identifies how a worker client reads an operation response.</summary>
+public enum WorkerResponseKind
+{
+    None,
+    Json,
+    Text,
+    Bytes
+}
+
+/// <summary>Declares the HTTP shape of one generated worker client operation.</summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+public sealed class WorkerClientOperationAttribute : Attribute
+{
+    /// <summary>Creates operation metadata for generated HTTP dispatch.</summary>
+    public WorkerClientOperationAttribute(
+        string httpMethod,
+        string path,
+        WorkerRequestKind requestKind,
+        WorkerResponseKind responseKind)
+    {
+        HttpMethod = httpMethod;
+        Path = path;
+        RequestKind = requestKind;
+        ResponseKind = responseKind;
+    }
+
+    /// <summary>Gets the HTTP method used by the operation.</summary>
+    public string HttpMethod { get; }
+
+    /// <summary>Gets the relative path template used by the operation.</summary>
+    public string Path { get; }
+
+    /// <summary>Gets the request body representation.</summary>
+    public WorkerRequestKind RequestKind { get; }
+
+    /// <summary>Gets the response body representation.</summary>
+    public WorkerResponseKind ResponseKind { get; }
+
+    /// <summary>Gets or sets the content type used for a byte request.</summary>
+    public string? RequestContentType { get; set; }
+
+    /// <summary>Gets or sets whether a 404 response maps to a nullable result.</summary>
+    public bool TreatNotFoundAsNull { get; set; }
+}
+
 /// <summary>Declares the SvgRenderer worker module.</summary>
 [WorkerModule(ModuleCatalog.SvgRenderer, "ModularMonolith.Worker.SvgRenderer", "SvgRenderer")]
 [WorkerProxyRoute("/render/{**path}", "/render/{**path}")]

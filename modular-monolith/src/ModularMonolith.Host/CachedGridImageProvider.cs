@@ -56,5 +56,5 @@ internal sealed class CachedGridImageProvider(
     }
 
     public Task<string> RenderPageAsync(GridSettings settings, string svg, CancellationToken cancellationToken)
-        => renderer.RenderPageAsync(settings, svg, cancellationToken);
+        => renderer.RenderPageAsync(new RenderPageRequest(settings, svg), cancellationToken);
 }

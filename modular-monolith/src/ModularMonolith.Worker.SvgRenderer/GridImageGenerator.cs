@@ -1,7 +1,9 @@
 using ModularMonolith.Contracts;
 
+/// <summary>Renders discrete grid patterns as SVG.</summary>
 public static class GridImageGenerator
 {
+    /// <summary>Renders a grid with checkerboard or concentric radial bands.</summary>
     public static string RenderSvg(GridSettings settings)
     {
         const int canvasSize = 300;
@@ -26,10 +28,22 @@ public static class GridImageGenerator
         return sb.ToString();
     }
 
-    private static string GetTileColor(int row, int col, GridSettings settings) => settings.Pattern switch
+    private static string GetTileColor(int row, int col, GridSettings settings)
     {
-        GridPattern.Checkerboard => (row + col) % 2 == 0 ? "#6366f1" : "#1e293b",
-        GridPattern.Radial => (Math.Abs(row - settings.Dimension / 2) + Math.Abs(col - settings.Dimension / 2)) % 2 == 0 ? "#10b981" : "#0f172a",
-        _ => "#ffffff"
-    };
+        if (settings.Pattern == GridPattern.Checkerboard)
+        {
+            return (row + col) % 2 == 0 ? "#6366f1" : "#1e293b";
+        }
+
+        if (settings.Pattern != GridPattern.Radial)
+        {
+            return "#ffffff";
+        }
+
+        var center = (settings.Dimension - 1) / 2d;
+        var rowOffset = row - center;
+        var colOffset = col - center;
+        var ring = (int)Math.Ceiling(Math.Sqrt(rowOffset * rowOffset + colOffset * colOffset));
+        return ring % 2 == 0 ? "#10b981" : "#0f172a";
+    }
 }

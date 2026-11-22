@@ -5,7 +5,7 @@ A .NET 10 modular monolith combining single-installer deployment with operating-
 ## Architecture & Documentation
 
 - [Unified Architecture Overview](docs/architecture/overview.md) — Comprehensive 4-tier model, platform abstractions (`IJob`, `IProcessGuard`, `IWorkerTransport`), domain glossary, status matrix, and platform deployment appendices.
-- [Architecture Backlog & Roadmap](docs/backlog/README.md) — Prioritized backlog items for YARP gateway routing (`BL-0002`), transport resilience (`BL-0001`), Roslyn source generation (`BL-0003`), packaging (`BL-0004`), and circuit breaking (`BL-0005`).
+- [Architecture Backlog & Roadmap](docs/backlog/README.md) — Prioritized backlog items and shipped transport resilience (`BL-0001`) and Roslyn module generation (`BL-0003`), plus planned packaging and circuit breaking.
 - [Running Windows Code & Tests on Linux](docs/research/running-windows-code-and-tests-on-linux.md) — Empirical research on cross-platform test execution and Wine compatibility.
 
 ## Quick Start

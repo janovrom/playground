@@ -21,10 +21,12 @@ public sealed class GatewayModuleTests
         services.AddWorkerHttpResilience();
         services.AddSingleton<ModularMonolith.Host.IWorkerClientFactory>(
             new RecordingClientFactory());
-        services.AddHostModule<SvgRendererHostModule, SvgRendererModuleDeclaration>();
-        services.AddHostModule<ImageCacheHostModule, ImageCacheModuleDeclaration>();
+        services.AddHostModuleCustomization<ImageCacheHostCustomization>();
+        services.AddGeneratedWorkerModules();
         using var provider = services.BuildServiceProvider();
-        var descriptors = provider.GetServices<HostModuleDescriptor>().ToArray();
+        var descriptors = HostModuleDescriptorComposer.Compose(
+            provider.GetServices<HostModuleDescriptor>(),
+            provider.GetServices<IHostModuleCustomization>()).ToArray();
 
         Assert.Equal(ModuleCatalog.All.Order(), descriptors.Select(module => module.Name).Order());
         Assert.Contains(
@@ -33,6 +35,18 @@ public sealed class GatewayModuleTests
         Assert.Contains(
             descriptors.SelectMany(module => module.ProxyRoutes),
             route => route.PublicPath == "/images/{**path}" && route.DestinationPath == "/images/{**path}");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ImageCache:DatabasePath"] = "/data/cache.db"
+            })
+            .Build();
+        var imageCache = Assert.Single(descriptors, descriptor => descriptor.Name == ModuleCatalog.ImageCache);
+        var renderer = Assert.Single(descriptors, descriptor => descriptor.Name == ModuleCatalog.SvgRenderer);
+        Assert.Equal(new ModularMonolith.Abstractions.JobLimits(), imageCache.DefaultLimits);
+        Assert.Equal(["--ImageCache:DatabasePath=/data/cache.db"], imageCache.GetWorkerArguments(configuration));
+        Assert.Equal(new ModularMonolith.Abstractions.JobLimits(), renderer.DefaultLimits);
+        Assert.Empty(renderer.GetWorkerArguments(configuration));
     }
 
     [Fact]
@@ -242,8 +256,7 @@ public sealed class GatewayModuleTests
             name,
             new ModularMonolith.Abstractions.JobLimits(),
             routes,
-            _ => [],
-            _ => { });
+            _ => []);
 
     private sealed class RecordingClientFactory : ModularMonolith.Host.IWorkerClientFactory
     {

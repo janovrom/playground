@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Http;
 using ModularMonolith.Host;
 using ModularMonolith.Host.Modules;
 using ModularMonolith.Contracts;
@@ -22,14 +23,17 @@ internal sealed class WorkerClientTestServices : IDisposable
         services.AddSingleton<IWorkerEndpointResolver>(manager);
         services.AddWorkerHttpResilience();
         services.AddSingleton<IWorkerClientFactory, WorkerClientFactory>();
-        services.AddHostModule<SvgRendererHostModule>();
-        services.AddHostModule<ImageCacheHostModule>();
+        services.AddGeneratedWorkerModules();
         var codec = new WorkerInternalContext(manager.SigningKey);
         services.AddHttpClient(ModuleCatalog.SvgRenderer)
             .AddHttpMessageHandler(() => new FixedWorkerContextHandler(codec));
         services.AddHttpClient(ModuleCatalog.ImageCache)
             .AddHttpMessageHandler(() => new FixedWorkerContextHandler(codec));
         _provider = services.BuildServiceProvider();
+        _provider.GetRequiredService<IHttpContextAccessor>().HttpContext = new DefaultHttpContext();
+        var httpContext = _provider.GetRequiredService<IHttpContextAccessor>().HttpContext!;
+        httpContext.Request.Headers[WorkerInternalContextConstants.HeaderName] =
+            codec.Encode(new ClaimsPrincipal(new ClaimsIdentity()), []);
     }
 
     public T GetRequiredService<T>() where T : notnull => _provider.GetRequiredService<T>();

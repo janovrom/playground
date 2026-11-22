@@ -21,13 +21,20 @@ namespace ModularMonolith.Tests;
 public sealed class GatewayStreamingTests
 {
     [LinuxFact]
-    public async Task ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes()
+    public Task UnixSocket_ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes()
+        => ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes(new UnixSocketTransport());
+
+    [WindowsFact]
+    public Task NamedPipe_ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes()
+        => ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes(new NamedPipeTransport());
+
+    private static async Task ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes(
+        IWorkerTransport transport)
     {
         var directory = Directory.CreateTempSubdirectory("gateway-streaming-");
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var firstChunkWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedTraceParent = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var transport = new UnixSocketTransport();
         using var allocator = transport.CreateAllocator(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -58,8 +65,7 @@ public sealed class GatewayStreamingTests
                 "Streamer",
                 new JobLimits(),
                 [new WorkerProxyRouteDescriptor("/stream/{**path}", "/stream/{**path}")],
-                _ => [],
-                _ => { })
+                _ => [])
         ]);
         var gatewayBuilder = WebApplication.CreateBuilder();
         gatewayBuilder.Logging.ClearProviders();

@@ -13,6 +13,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -31,6 +32,8 @@
     <ProjectReference Include="..\..\src\ModularMonolith.Windows\ModularMonolith.Windows.csproj" />
     <ProjectReference Include="..\..\src\ModularMonolith.Platform\ModularMonolith.Platform.csproj" />
     <ProjectReference Include="..\..\src\ModularMonolith.Contracts\ModularMonolith.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\ModularMonolith.Generators\ModularMonolith.Generators.csproj"
+                      ReferenceOutputAssembly="true" />
     <ProjectReference Include="..\..\src\ModularMonolith.Host\ModularMonolith.Host.csproj" />
     <ProjectReference Include="..\..\src\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" />
     <ProjectReference Include="..\..\src\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj" />

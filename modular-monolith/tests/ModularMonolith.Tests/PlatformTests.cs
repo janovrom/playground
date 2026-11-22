@@ -134,12 +134,14 @@ public sealed class PlatformTests
         var baseDirectory = AppContext.BaseDirectory;
         var baseSettings = new ConfigurationBuilder().AddJsonFile(Path.Combine(baseDirectory, "appsettings.json")).Build();
         var linux = new ConfigurationBuilder().AddJsonFile(Path.Combine(baseDirectory, "appsettings.linux.json")).Build();
+        var development = new ConfigurationBuilder().AddJsonFile(Path.Combine(baseDirectory, "appsettings.Development.json")).Build();
         var windows = new ConfigurationBuilder().AddJsonFile(Path.Combine(baseDirectory, "appsettings.windows.json")).Build();
 
         Assert.Null(baseSettings["Workers:SocketDirectory"]);
         Assert.Null(baseSettings["ImageCache:DatabasePath"]);
         Assert.Equal("/run/modular-monolith", linux["Workers:SocketDirectory"]);
         Assert.Equal("/var/lib/modular-monolith/image-cache.db", linux["ImageCache:DatabasePath"]);
+        Assert.Empty(development["Workers:SocketDirectory"]!);
         Assert.Equal("NamedPipe", windows["Workers:Transport"]);
         Assert.Null(windows["Workers:SocketDirectory"]);
     }

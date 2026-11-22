@@ -81,7 +81,7 @@ public sealed class WorkerConnectionRecoveryTests
         };
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         var tracked = new TrackedWorkerTransport(transport);
-        var manager = new WorkerManager(launcher, tracked, HostModuleCatalog.FromAdapters([new SvgRendererHostModule()]), configuration,
+        var manager = new WorkerManager(launcher, tracked, TestHostModuleCatalog.Create(ModuleCatalog.SvgRenderer), configuration,
             NullLogger<WorkerManager>.Instance, new RequestDrainTracker());
         var clients = new WorkerClientTestServices(manager, tracked, configuration);
 

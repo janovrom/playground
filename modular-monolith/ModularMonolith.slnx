@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="src/ModularMonolith.Abstractions/ModularMonolith.Abstractions.csproj" />
   <Project Path="src/ModularMonolith.Contracts/ModularMonolith.Contracts.csproj" />
+  <Project Path="src/ModularMonolith.Generators/ModularMonolith.Generators.csproj" />
   <Project Path="src/ModularMonolith.Linux/ModularMonolith.Linux.csproj" />
   <Project Path="src/ModularMonolith.Windows/ModularMonolith.Windows.csproj" />
   <Project Path="src/ModularMonolith.Platform/ModularMonolith.Platform.csproj" />

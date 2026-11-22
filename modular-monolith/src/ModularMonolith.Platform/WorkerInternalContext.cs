@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ModularMonolith.Platform;
 
@@ -82,7 +83,9 @@ public sealed class WorkerInternalContext
             issuedAt.ToUnixTimeSeconds(),
             issuedAt.Add(MaximumLifetime).ToUnixTimeSeconds(),
             Guid.NewGuid().ToString("N"));
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(
+            payload,
+            WorkerInternalContextJsonContext.Default.WorkerInternalContextPayload);
         var signature = HMACSHA256.HashData(_signingKey.Value, bytes);
         return $"{Base64UrlEncode(bytes)}.{Base64UrlEncode(signature)}";
     }
@@ -118,7 +121,9 @@ public sealed class WorkerInternalContext
         WorkerInternalContextPayload payload;
         try
         {
-            payload = JsonSerializer.Deserialize<WorkerInternalContextPayload>(payloadBytes)
+            payload = JsonSerializer.Deserialize(
+                    payloadBytes,
+                    WorkerInternalContextJsonContext.Default.WorkerInternalContextPayload)
                 ?? throw new WorkerInternalContextException("The internal request context is empty.");
         }
         catch (JsonException exception)
@@ -150,16 +155,20 @@ public sealed class WorkerInternalContext
         return Convert.FromBase64String(padded);
     }
 
-    private sealed record WorkerInternalContextPayload(
-        bool Authenticated,
-        string? AuthenticationType,
-        InternalClaim[] Claims,
-        long IssuedAt,
-        long ExpiresAt,
-        string Nonce);
-
-    private sealed record InternalClaim(string Type, string Value);
 }
+
+internal sealed record WorkerInternalContextPayload(
+    bool Authenticated,
+    string? AuthenticationType,
+    InternalClaim[] Claims,
+    long IssuedAt,
+    long ExpiresAt,
+    string Nonce);
+
+internal sealed record InternalClaim(string Type, string Value);
+
+[JsonSerializable(typeof(WorkerInternalContextPayload))]
+internal partial class WorkerInternalContextJsonContext : JsonSerializerContext;
 
 /// <summary>Indicates that an internal worker request context is malformed or untrusted.</summary>
 public sealed class WorkerInternalContextException : Exception
