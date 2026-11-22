@@ -19,14 +19,33 @@ public sealed class WorkerSourceGeneratorTests
         var first = Run(compilation);
         var second = Run(compilation);
         var source = Assert.Single(first.Results).GeneratedSources.Single().SourceText.ToString();
+        var withCustomization = Run(Compilation(
+            "ModularMonolith.Host",
+            """
+            namespace ModularMonolith.Host.Modules;
+
+            internal sealed class ImageCacheHostCustomization
+            {
+                public string ModuleName => "image-cache";
+                public System.Collections.Generic.IEnumerable<string> GetWorkerArguments(
+                    Microsoft.Extensions.Configuration.IConfiguration configuration) => [];
+            }
+            """));
+        var sourceWithCustomization = Assert.Single(withCustomization.Results)
+            .GeneratedSources
+            .Single()
+            .SourceText
+            .ToString();
 
         Assert.Equal(source, Assert.Single(second.Results).GeneratedSources.Single().SourceText.ToString());
+        Assert.Equal(source, sourceWithCustomization);
         Assert.Contains("AddGeneratedWorkerModules", source);
         Assert.Contains("\"svg-renderer\"", source);
         Assert.Contains("\"/render/{**path}\"", source);
         Assert.Contains("class RendererClient", source);
         Assert.Contains("ContractJsonContext.Default.RenderPageRequest", source);
         Assert.DoesNotContain("System.Reflection", source);
+        Assert.DoesNotContain("ImageCacheHostCustomization", source);
     }
 
     /// <summary>Verifies that a worker module produces one generated entry point.</summary>

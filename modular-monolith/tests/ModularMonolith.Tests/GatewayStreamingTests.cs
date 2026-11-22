@@ -65,8 +65,7 @@ public sealed class GatewayStreamingTests
                 "Streamer",
                 new JobLimits(),
                 [new WorkerProxyRouteDescriptor("/stream/{**path}", "/stream/{**path}")],
-                _ => [],
-                _ => { })
+                _ => [])
         ]);
         var gatewayBuilder = WebApplication.CreateBuilder();
         gatewayBuilder.Logging.ClearProviders();

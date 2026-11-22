@@ -21,9 +21,12 @@ public sealed class GatewayModuleTests
         services.AddWorkerHttpResilience();
         services.AddSingleton<ModularMonolith.Host.IWorkerClientFactory>(
             new RecordingClientFactory());
+        services.AddHostModuleCustomization<ImageCacheHostCustomization>();
         services.AddGeneratedWorkerModules();
         using var provider = services.BuildServiceProvider();
-        var descriptors = provider.GetServices<HostModuleDescriptor>().ToArray();
+        var descriptors = HostModuleDescriptorComposer.Compose(
+            provider.GetServices<HostModuleDescriptor>(),
+            provider.GetServices<IHostModuleCustomization>()).ToArray();
 
         Assert.Equal(ModuleCatalog.All.Order(), descriptors.Select(module => module.Name).Order());
         Assert.Contains(
@@ -253,8 +256,7 @@ public sealed class GatewayModuleTests
             name,
             new ModularMonolith.Abstractions.JobLimits(),
             routes,
-            _ => [],
-            _ => { });
+            _ => []);
 
     private sealed class RecordingClientFactory : ModularMonolith.Host.IWorkerClientFactory
     {

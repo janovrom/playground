@@ -100,16 +100,18 @@ Each module implements cohesive vertical domain logic:
 * **Worker Side (`IWorkerModule`)**: Configures internal dependency injection (`ConfigureServicesAsync`) and registers endpoints (`MapEndpoints`).
 * **Shared Declaration**: Defines stable module identity, proxy routes, client operations, and DTOs in a shared assembly.
 * **Generated Wiring (`WorkerSourceGenerator`)**: Creates Host descriptors, typed clients, DI registration, and worker `Main` methods from compile-time metadata.
-* **Host Side (`IHostModuleCustomization` hook)**: Supplies optional process-specific resource limits, worker arguments, or Host services. Modules that use defaults do not need a Host hook.
+* **Host Customization**: An explicitly registered `IHostModuleCustomization` can add module-specific limits, worker arguments, or Host services. Runtime descriptor composition applies these customizations after generation. The generator does not inspect customization types or members.
 * **Serialization & Contracts (`ModularMonolith.Contracts`)**: DTOs and explicit `JsonSerializerContext` metadata shared by Host and workers without reflection.
 
 ```mermaid
 flowchart LR
     Contract[Shared module and client metadata] --> Generator[WorkerSourceGenerator]
     Worker[IWorkerModule implementation] --> Generator
-    Generator --> HostWiring[Generated Host descriptors and clients]
+    Generator --> HostWiring[Generated base descriptors and clients]
     Generator --> WorkerMain[Generated worker Main]
-    HostWiring --> Runtime[Existing BL-0002 gateway runtime]
+    Customization[Registered Host customization] --> Composer[Runtime descriptor composer]
+    HostWiring --> Composer
+    Composer --> Runtime[Existing BL-0002 gateway runtime]
     WorkerMain --> WorkerHost
 ```
 

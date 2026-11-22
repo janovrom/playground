@@ -6,8 +6,11 @@ namespace ModularMonolith.Host.Modules;
 /// <summary>Customizes generated Host behavior for one worker module.</summary>
 internal interface IHostModuleCustomization
 {
+    /// <summary>Gets the generated module name that this customization extends.</summary>
+    string ModuleName { get; }
+
     /// <summary>Gets the default resource limits when configuration does not override them.</summary>
-    JobLimits DefaultLimits => new();
+    JobLimits CustomizeLimits(JobLimits defaults) => defaults;
 
     /// <summary>Returns additional arguments for the worker process.</summary>
     IEnumerable<string> GetWorkerArguments(IConfiguration configuration);
@@ -18,6 +21,17 @@ internal interface IHostModuleCustomization
 
 internal static class HostModuleServiceCollectionExtensions
 {
+    /// <summary>Registers and configures one Host customization without involving generated code.</summary>
+    public static IServiceCollection AddHostModuleCustomization<TCustomization>(
+        this IServiceCollection services)
+        where TCustomization : class, IHostModuleCustomization, new()
+    {
+        var customization = new TCustomization();
+        services.AddSingleton<IHostModuleCustomization>(customization);
+        customization.ConfigureServices(services);
+        return services;
+    }
+
     /// <summary>Registers a generated Host module descriptor and its transport client.</summary>
     public static IServiceCollection AddHostModuleDescriptor(
         this IServiceCollection services,
@@ -31,7 +45,6 @@ internal static class HostModuleServiceCollectionExtensions
             .AddHttpMessageHandler<WorkerContextPropagationHandler>()
             .ConfigurePrimaryHttpMessageHandler(serviceProvider =>
                 serviceProvider.GetRequiredService<WorkerTransportHandlerRegistry>().Create(descriptor.Name));
-        descriptor.ConfigureServices(services);
         return services;
     }
 }

@@ -27,9 +27,12 @@ builder.Services.AddSingleton<IWorkerRoutingSource>(serviceProvider => servicePr
 builder.Services.AddSingleton<IWorkerEndpointResolver>(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
 builder.Services.AddWorkerHttpResilience();
 builder.Services.AddSingleton<IWorkerClientFactory, WorkerClientFactory>();
+builder.Services.AddHostModuleCustomization<ImageCacheHostCustomization>();
 builder.Services.AddGeneratedWorkerModules();
 builder.Services.AddSingleton<IHostModuleCatalog>(serviceProvider =>
-    new HostModuleCatalog(serviceProvider.GetServices<HostModuleDescriptor>()));
+    new HostModuleCatalog(HostModuleDescriptorComposer.Compose(
+        serviceProvider.GetServices<HostModuleDescriptor>(),
+        serviceProvider.GetServices<IHostModuleCustomization>())));
 builder.Services.AddSingleton<IGridImageProvider, CachedGridImageProvider>();
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WorkerManager>());
 builder.Services.AddReverseProxy();

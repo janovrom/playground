@@ -1,9 +1,12 @@
-using ModularMonolith.Abstractions;
+using ModularMonolith.Contracts;
 
 namespace ModularMonolith.Host.Modules;
 
 internal sealed class ImageCacheHostCustomization : IHostModuleCustomization
 {
+    /// <summary>Gets the module key for generated image-cache descriptors.</summary>
+    public string ModuleName => ModuleCatalog.ImageCache;
+
     /// <summary>Builds the database path argument passed to the worker.</summary>
     public IEnumerable<string> GetWorkerArguments(IConfiguration configuration)
     {

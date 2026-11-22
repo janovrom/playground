@@ -60,7 +60,9 @@ public sealed class HostModuleTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => manager.StartAsync(CancellationToken.None));
 
-        Assert.Equal(new AlphaModule().DefaultLimits, Assert.Single(launcher.Launches).Limits);
+        Assert.Equal(
+            new JobLimits(MaxProcesses: 10),
+            Assert.Single(launcher.Launches).Limits);
     }
 
     [Fact]
@@ -211,15 +213,36 @@ public sealed class HostModuleTests
     }
 
     [Fact]
-    public void AddHostModuleDescriptor_RegistersTheModuleAndItsServices()
+    public void AddHostModuleCustomization_RegistersTheModuleAndItsServices()
     {
         var services = new ServiceCollection();
-        var module = new AlphaModule();
 
-        services.AddHostModuleDescriptor(Descriptor(module));
+        services.AddHostModuleCustomization<AlphaModule>();
         using var provider = services.BuildServiceProvider();
 
         Assert.Equal("alpha", provider.GetRequiredService<AlphaMarker>().Module);
+    }
+
+    [Fact]
+    public void HostModuleDescriptorComposer_RejectsUnknownCustomization()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            HostModuleDescriptorComposer.Compose(
+                [Descriptor(new BetaModule())],
+                [new AlphaModule()]));
+
+        Assert.Contains("unknown module 'alpha'", exception.Message);
+    }
+
+    [Fact]
+    public void HostModuleDescriptorComposer_RejectsDuplicateCustomizations()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            HostModuleDescriptorComposer.Compose(
+                [Descriptor(new AlphaModule())],
+                [new AlphaModule(), new AlphaModule()]));
+
+        Assert.Contains("module 'alpha' is registered more than once", exception.Message);
     }
 
     [Fact]
@@ -309,7 +332,9 @@ public sealed class HostModuleTests
         => new(
             launcher,
             new UnixSocketTransport(),
-            new HostModuleCatalog(modules.Select(Descriptor)),
+            new HostModuleCatalog(HostModuleDescriptorComposer.Compose(
+                modules.Select(Descriptor),
+                modules)),
             configuration,
             NullLogger<WorkerManager>.Instance,
             new RequestDrainTracker());
@@ -319,10 +344,9 @@ public sealed class HostModuleTests
             module.Name,
             module.WorkerProject,
             module.ConfigSection,
-            module.DefaultLimits,
+            new JobLimits(),
             [],
-            module.GetWorkerArguments,
-            module.ConfigureServices);
+            _ => []);
 
     private static IConfiguration Configuration(params (string Key, string Value)[] values)
         => new ConfigurationBuilder()
@@ -331,12 +355,13 @@ public sealed class HostModuleTests
 
     private sealed record AlphaMarker(string Module);
 
-    private class AlphaModule
+    private class AlphaModule : IHostModuleCustomization
     {
         public virtual string Name => "alpha";
+        public string ModuleName => Name;
         public string WorkerProject => "Alpha.Worker";
         public string ConfigSection => "Alpha";
-        public JobLimits DefaultLimits => new(MaxProcesses: 10);
+        public JobLimits CustomizeLimits(JobLimits defaults) => defaults with { MaxProcesses = 10 };
         public IEnumerable<string> GetWorkerArguments(IConfiguration configuration) => ["--alpha-arg=1"];
         public void ConfigureServices(IServiceCollection services) => services.AddSingleton(new AlphaMarker(Name));
     }
