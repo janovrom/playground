@@ -14,7 +14,7 @@ public sealed class WorkerSourceGeneratorTests
     {
         var compilation = Compilation(
             "ModularMonolith.Host",
-            "namespace ModularMonolith.Host.Modules; internal interface IHostModule { }");
+            "namespace ModularMonolith.Host.Modules; internal interface IHostModuleCustomization { }");
 
         var first = Run(compilation);
         var second = Run(compilation);

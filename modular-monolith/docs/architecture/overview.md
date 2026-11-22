@@ -100,7 +100,7 @@ Each module implements cohesive vertical domain logic:
 * **Worker Side (`IWorkerModule`)**: Configures internal dependency injection (`ConfigureServicesAsync`) and registers endpoints (`MapEndpoints`).
 * **Shared Declaration**: Defines stable module identity, proxy routes, client operations, and DTOs in a shared assembly.
 * **Generated Wiring (`WorkerSourceGenerator`)**: Creates Host descriptors, typed clients, DI registration, and worker `Main` methods from compile-time metadata.
-* **Host Side (`IHostModule` hook)**: Supplies optional process-specific resource limits and worker arguments. Modules that use defaults do not need a Host hook.
+* **Host Side (`IHostModuleCustomization` hook)**: Supplies optional process-specific resource limits, worker arguments, or Host services. Modules that use defaults do not need a Host hook.
 * **Serialization & Contracts (`ModularMonolith.Contracts`)**: DTOs and explicit `JsonSerializerContext` metadata shared by Host and workers without reflection.
 
 ```mermaid

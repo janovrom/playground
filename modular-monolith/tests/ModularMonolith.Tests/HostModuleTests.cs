@@ -211,14 +211,14 @@ public sealed class HostModuleTests
     }
 
     [Fact]
-    public void AddHostModule_RegistersTheModuleAndItsServices()
+    public void AddHostModuleDescriptor_RegistersTheModuleAndItsServices()
     {
         var services = new ServiceCollection();
+        var module = new AlphaModule();
 
-        services.AddHostModule<AlphaModule>();
+        services.AddHostModuleDescriptor(Descriptor(module));
         using var provider = services.BuildServiceProvider();
 
-        Assert.IsType<AlphaModule>(Assert.Single(provider.GetServices<IHostModule>()));
         Assert.Equal("alpha", provider.GetRequiredService<AlphaMarker>().Module);
     }
 
@@ -235,7 +235,7 @@ public sealed class HostModuleTests
         Assert.IsType<ImageCacheClient>(provider.GetRequiredService<IImageCacheClient>());
 
         Assert.Equal([ModuleCatalog.SvgRenderer, ModuleCatalog.ImageCache], factory.Requested);
-        Assert.Equal(ModuleCatalog.All.Order(), provider.GetServices<IHostModule>().Select(module => module.Name).Order());
+        Assert.Equal(ModuleCatalog.All.Order(), provider.GetServices<HostModuleDescriptor>().Select(module => module.Name).Order());
     }
 
     [Fact]
@@ -257,10 +257,10 @@ public sealed class HostModuleTests
     [Fact]
     public void ImageCacheModule_PassesTheConfiguredDatabasePathToItsWorker()
     {
-        var arguments = new ImageCacheHostModule().GetWorkerArguments(Configuration(("ImageCache:DatabasePath", "/data/cache.db")));
+        var arguments = new ImageCacheHostCustomization().GetWorkerArguments(
+            Configuration(("ImageCache:DatabasePath", "/data/cache.db")));
 
         Assert.Equal(["--ImageCache:DatabasePath=/data/cache.db"], arguments);
-        Assert.Empty(new SvgRendererHostModule().GetWorkerArguments(Configuration()));
     }
 
     [Fact]
@@ -305,14 +305,24 @@ public sealed class HostModuleTests
         }
     }
 
-    private static WorkerManager CreateManager(IConfiguration configuration, IWorkerLauncher launcher, params IHostModule[] modules)
+    private static WorkerManager CreateManager(IConfiguration configuration, IWorkerLauncher launcher, params AlphaModule[] modules)
         => new(
             launcher,
             new UnixSocketTransport(),
-            HostModuleCatalog.FromAdapters(modules),
+            new HostModuleCatalog(modules.Select(Descriptor)),
             configuration,
             NullLogger<WorkerManager>.Instance,
             new RequestDrainTracker());
+
+    private static HostModuleDescriptor Descriptor(AlphaModule module)
+        => new(
+            module.Name,
+            module.WorkerProject,
+            module.ConfigSection,
+            module.DefaultLimits,
+            [],
+            module.GetWorkerArguments,
+            module.ConfigureServices);
 
     private static IConfiguration Configuration(params (string Key, string Value)[] values)
         => new ConfigurationBuilder()
@@ -321,7 +331,7 @@ public sealed class HostModuleTests
 
     private sealed record AlphaMarker(string Module);
 
-    private class AlphaModule : IHostModule
+    private class AlphaModule
     {
         public virtual string Name => "alpha";
         public string WorkerProject => "Alpha.Worker";

@@ -9,11 +9,33 @@ using ModularMonolith.Host.Modules;
 using ModularMonolith.Linux;
 using ModularMonolith.Platform.Transport;
 using ModularMonolith.Worker.ImageCache;
+using ModularMonolith.Worker.SvgRenderer;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 
 namespace ModularMonolith.Tests;
 
 public sealed class GridModuleTests
 {
+    [Fact]
+    public void SvgRenderer_MapsGetAndPostForSvgRendering()
+    {
+        var builder = WebApplication.CreateBuilder();
+        var app = builder.Build();
+        new SvgRendererWorkerModule().MapEndpoints(app);
+
+        var methods = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.RoutePattern.RawText == "/render/svg")
+            .SelectMany(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains(HttpMethods.Get, methods);
+        Assert.Contains(HttpMethods.Post, methods);
+    }
+
     [Theory]
     [InlineData(null, null, 6, GridPattern.Checkerboard)]
     [InlineData("radial", 3, 3, GridPattern.Radial)]
@@ -50,12 +72,15 @@ public sealed class GridModuleTests
     }
 
     [Fact]
-    public void RenderSvg_RadialPatternUsesRadialPalette()
+    public void RenderSvg_RadialPatternUsesConcentricEuclideanRings()
     {
-        var svg = GridImageGenerator.RenderSvg(new GridSettings(4, GridPattern.Radial));
+        var svg = GridImageGenerator.RenderSvg(new GridSettings(7, GridPattern.Radial));
 
-        Assert.Contains("fill=\"#10b981\"", svg);
-        Assert.Contains("fill=\"#0f172a\"", svg);
+        Assert.Equal("#10b981", FillAt(svg, 3, 3, 7));
+        Assert.Equal("#0f172a", FillAt(svg, 3, 2, 7));
+        Assert.Equal("#10b981", FillAt(svg, 0, 1, 7));
+        Assert.Equal("#0f172a", FillAt(svg, 0, 0, 7));
+        Assert.Equal(FillAt(svg, 0, 1, 7), FillAt(svg, 6, 1, 7));
     }
 
     [Fact]
@@ -216,7 +241,7 @@ public sealed class GridModuleTests
         var manager = new WorkerManager(
             new LocalWorkerLauncher(new SigTermStopStrategy()),
             transport,
-            HostModuleCatalog.FromAdapters([new SvgRendererHostModule(), new ImageCacheHostModule()]),
+            TestHostModuleCatalog.Create(),
             configuration,
             NullLogger<WorkerManager>.Instance,
             new RequestDrainTracker());
@@ -327,6 +352,16 @@ public sealed class GridModuleTests
         }
 
         return count;
+    }
+
+    private static string FillAt(string svg, int row, int col, int dimension)
+    {
+        var tileSize = 300 / dimension;
+        var prefix = $"  <rect x=\"{col * tileSize}\" y=\"{row * tileSize}\" ";
+        var line = svg.Split(Environment.NewLine).Single(item => item.StartsWith(prefix, StringComparison.Ordinal));
+        const string marker = "fill=\"";
+        var start = line.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        return line[start..line.IndexOf('"', start)];
     }
 
     private sealed class FakeImageCacheClient(byte[]? cached) : IImageCacheClient

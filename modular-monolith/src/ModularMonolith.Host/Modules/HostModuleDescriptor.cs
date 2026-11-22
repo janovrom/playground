@@ -27,20 +27,6 @@ internal sealed class HostModuleCatalog : IHostModuleCatalog
     }
 
     public IReadOnlyList<HostModuleDescriptor> Modules { get; }
-
-    /// <summary>Creates descriptors for tests and legacy manual registrations.</summary>
-    public static HostModuleCatalog FromAdapters(IEnumerable<IHostModule> modules)
-    {
-        ArgumentNullException.ThrowIfNull(modules);
-        return new HostModuleCatalog(modules.Select(module => new HostModuleDescriptor(
-            module.Name,
-            module.WorkerProject,
-            module.ConfigSection,
-            module.DefaultLimits,
-            [],
-            module.GetWorkerArguments,
-            module.ConfigureServices)));
-    }
 }
 
 internal static class HostModuleDescriptorValidator

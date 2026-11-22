@@ -40,9 +40,9 @@ public sealed class GatewayModuleTests
             .Build();
         var imageCache = Assert.Single(descriptors, descriptor => descriptor.Name == ModuleCatalog.ImageCache);
         var renderer = Assert.Single(descriptors, descriptor => descriptor.Name == ModuleCatalog.SvgRenderer);
-        Assert.Equal(new ImageCacheHostModule().DefaultLimits, imageCache.DefaultLimits);
+        Assert.Equal(new ModularMonolith.Abstractions.JobLimits(), imageCache.DefaultLimits);
         Assert.Equal(["--ImageCache:DatabasePath=/data/cache.db"], imageCache.GetWorkerArguments(configuration));
-        Assert.Equal(new SvgRendererHostModule().DefaultLimits, renderer.DefaultLimits);
+        Assert.Equal(new ModularMonolith.Abstractions.JobLimits(), renderer.DefaultLimits);
         Assert.Empty(renderer.GetWorkerArguments(configuration));
     }
 

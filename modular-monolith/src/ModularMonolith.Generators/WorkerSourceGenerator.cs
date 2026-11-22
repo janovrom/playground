@@ -18,7 +18,7 @@ public sealed class WorkerSourceGenerator : IIncrementalGenerator
     private const string WorkerClientAttributeName = "ModularMonolith.Contracts.WorkerClientAttribute";
     private const string WorkerClientOperationAttributeName = "ModularMonolith.Contracts.WorkerClientOperationAttribute";
     private const string WorkerModuleInterfaceName = "ModularMonolith.Worker.Hosting.IWorkerModule";
-    private const string HostModuleInterfaceName = "ModularMonolith.Host.Modules.IHostModule";
+    private const string HostModuleInterfaceName = "ModularMonolith.Host.Modules.IHostModuleCustomization";
 
     /// <summary>Registers the source-generation transform with the compilation.</summary>
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -142,7 +142,7 @@ public sealed class WorkerSourceGenerator : IIncrementalGenerator
             hostModules.TryGetValue(ToIdentifier(module.Name), out var hostModule);
             if (hostModule is not null)
             {
-                builder.Append("        var ");
+                builder.Append("        IHostModuleCustomization ");
                 builder.Append(module.VariableName);
                 builder.Append("Module = new ");
                 builder.Append(hostModule.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
@@ -202,13 +202,6 @@ public sealed class WorkerSourceGenerator : IIncrementalGenerator
 
             builder.Append("        services.AddHostModuleDescriptor(");
             builder.Append(module.VariableName);
-            if (hostModule is not null)
-            {
-                builder.Append(", ");
-                builder.Append(module.VariableName);
-                builder.Append("Module");
-            }
-
             builder.AppendLine(");");
         }
 
@@ -577,8 +570,8 @@ public sealed class WorkerSourceGenerator : IIncrementalGenerator
         => type.AllInterfaces.Any(item => item.ToDisplayString() == interfaceName);
 
     private static string ToHostModuleIdentity(INamedTypeSymbol type)
-        => type.Name.EndsWith("HostModule", StringComparison.Ordinal)
-            ? type.Name.Substring(0, type.Name.Length - "HostModule".Length)
+        => type.Name.EndsWith("HostCustomization", StringComparison.Ordinal)
+            ? type.Name.Substring(0, type.Name.Length - "HostCustomization".Length)
             : type.Name;
 
     private static string ToIdentifier(string moduleName)
