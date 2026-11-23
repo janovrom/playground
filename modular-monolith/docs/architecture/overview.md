@@ -145,7 +145,7 @@ Protects the Host from cascading failures and crash-looping workers:
 | **Gateway Routing** | Generated descriptor and client registration feeding the BL-0002 YARP dynamic proxy | Circuit breaking | `BL-0002`, `BL-0003`, `BL-0005` |
 | **Transport Resilience** | Microsoft HTTP resilience pipeline (two bounded jittered retries), per-worker timeouts, and lifecycle readiness gating | Circuit breaking and additional connection-pool controls | `BL-0001`, `BL-0005` |
 | **Module Code Generation** | `WorkerSourceGenerator` emits Host wiring, typed clients, and worker entry points without runtime reflection | Additional metadata and client operation shapes as modules require them | `BL-0003` |
-| **Build & Packaging** | MSBuild targets copying outputs into `workers/` | Unified worker project & single-installer pipeline | `BL-0004` |
+| **Build & Packaging** | Dynamic MSBuild batching of marked worker project references into framework-dependent or self-contained `workers/<ProjectName>` bundles | Extend the same bundle contract as new worker RIDs and publication modes are added | `BL-0004` |
 | **Crash Loop Protection** | Exponential backoff restart (1s–30s) | Sliding-window circuit breaker & Poison Pill quarantine | `BL-0005` |
 | **High-Throughput IPC** | Kestrel over UDS / Named Pipes with JSON | Shared Memory (MMF) ring buffer for sub-millisecond streaming | `BL-0006` |
 

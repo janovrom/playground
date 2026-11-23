@@ -36,6 +36,23 @@ public sealed class GridModuleTests
         Assert.Contains(HttpMethods.Post, methods);
     }
 
+    [Fact]
+    public void SvgRenderer_MapsGetForPixelTextRendering()
+    {
+        var builder = WebApplication.CreateBuilder();
+        var app = builder.Build();
+        new SvgRendererWorkerModule().MapEndpoints(app);
+
+        var methods = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.RoutePattern.RawText == "/render/text")
+            .SelectMany(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains(HttpMethods.Get, methods);
+    }
+
     [Theory]
     [InlineData(null, null, 6, GridPattern.Checkerboard)]
     [InlineData("radial", 3, 3, GridPattern.Radial)]
@@ -81,6 +98,82 @@ public sealed class GridModuleTests
         Assert.Equal("#10b981", FillAt(svg, 0, 1, 7));
         Assert.Equal("#0f172a", FillAt(svg, 0, 0, 7));
         Assert.Equal(FillAt(svg, 0, 1, 7), FillAt(svg, 6, 1, 7));
+    }
+
+    [Fact]
+    public void PixelTextSvgGenerator_RendersCrispFiveBySevenPixels()
+    {
+        var svg = PixelTextSvgGenerator.RenderSvg("A");
+
+        Assert.Equal(svg, PixelTextSvgGenerator.RenderSvg("A"));
+        Assert.Equal(svg, PixelTextSvgGenerator.RenderSvg("a"));
+        Assert.Contains("width=\"50\"", svg);
+        Assert.Contains($"height=\"{PixelTextSvgGenerator.TextHeight}\"", svg);
+        Assert.Contains("shape-rendering=\"crispEdges\"", svg);
+        Assert.Equal(18, Count(svg, "<rect "));
+        Assert.Contains("<rect x=\"10\" y=\"0\" width=\"10\" height=\"10\"", svg);
+    }
+
+    [Fact]
+    public void PixelTextSvgGenerator_UsesFixedHeightAndAccountsForSpaces()
+    {
+        var svg = PixelTextSvgGenerator.RenderSvg("A B");
+
+        Assert.Contains("width=\"170\"", svg);
+        Assert.Contains($"height=\"{PixelTextSvgGenerator.TextHeight}\"", svg);
+        Assert.Equal(38, Count(svg, "<rect "));
+    }
+
+    [Fact]
+    public void PixelTextSvgGenerator_AcceptsTheMaximumLength()
+    {
+        var svg = PixelTextSvgGenerator.RenderSvg(new string('A', PixelTextSvgGenerator.MaxCharacters));
+
+        Assert.Contains("width=\"1190\"", svg);
+        Assert.Equal(360, Count(svg, "<rect "));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("ABCDEFGHIJKLMNOPQRSTU")]
+    [InlineData("HELLO-WORLD")]
+    public void PixelTextSvgGenerator_RejectsInvalidText(string text)
+        => Assert.Throws<ArgumentException>(() => PixelTextSvgGenerator.RenderSvg(text));
+
+    [Theory]
+    [InlineData("HELLO2", StatusCodes.Status200OK, "image/svg+xml")]
+    [InlineData("HELLO-WORLD", StatusCodes.Status400BadRequest, null)]
+    public async Task PixelTextEndpoint_ValidatesAndRendersText(
+        string text,
+        int expectedStatusCode,
+        string? expectedContentType)
+    {
+        var builder = WebApplication.CreateBuilder();
+        await using var app = builder.Build();
+        new SvgRendererWorkerModule().MapEndpoints(app);
+        var endpoint = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(item => item.RoutePattern.RawText == "/render/text");
+        var context = new DefaultHttpContext
+        {
+            RequestServices = app.Services
+        };
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = "/render/text";
+        context.Request.QueryString = QueryString.Create("text", text);
+        context.Response.Body = new MemoryStream();
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(expectedStatusCode, context.Response.StatusCode);
+        Assert.Equal(expectedContentType, context.Response.ContentType);
+        if (expectedStatusCode == StatusCodes.Status200OK)
+        {
+            context.Response.Body.Position = 0;
+            var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
+            Assert.Contains("<svg", body);
+        }
     }
 
     [Fact]

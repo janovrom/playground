@@ -23,44 +23,59 @@
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"
                       GlobalPropertiesToRemove="PublishTrimmed;PublishAot" />
-    <ProjectReference Include="..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj"
+                      ReferenceOutputAssembly="false"
+                      BuildReference="false"
+                      Private="false"
+                      PackageAsWorker="true" />
+    <ProjectReference Include="..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj"
+                      ReferenceOutputAssembly="false"
+                      BuildReference="false"
+                      Private="false"
+                      PackageAsWorker="true" />
   </ItemGroup>
 
-  <Target Name="CopyWorkerOutputs" AfterTargets="Build">
-    <MSBuild Projects="$(MSBuildProjectDirectory)\..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
-      <Output TaskParameter="TargetOutputs" ItemName="SvgRendererAssembly" />
+  <!-- Packaging targets select direct project references marked with PackageAsWorker. -->
+  <ItemGroup>
+    <WorkerProject Include="@(ProjectReference)" />
+  </ItemGroup>
+
+  <!-- Build every selected worker, then copy its complete output below workers/<ProjectName>. -->
+  <Target Name="CopyWorkerOutputs" AfterTargets="Build" Condition="'@(WorkerProject)' != ''">
+    <RemoveDir Directories="$(OutDir)workers" />
+
+    <MSBuild
+      Projects="@(WorkerProject)"
+      Targets="Build;GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+      BuildInParallel="$(BuildInParallel)"
+      Condition="'%(WorkerProject.PackageAsWorker)' == 'true'">
+      <Output TaskParameter="TargetOutputs" ItemName="_WorkerAssembly" />
     </MSBuild>
-    <MSBuild Projects="$(MSBuildProjectDirectory)\..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
-      <Output TaskParameter="TargetOutputs" ItemName="ImageCacheAssembly" />
-    </MSBuild>
-    <CreateItem Include="@(SvgRendererAssembly->'%(RootDir)%(Directory)**\*')">
-      <Output TaskParameter="Include" ItemName="SvgRendererFiles" />
+
+    <CreateItem
+      Include="%(_WorkerAssembly.RootDir)%(_WorkerAssembly.Directory)**\*"
+      AdditionalMetadata="WorkerProject=%(_WorkerAssembly.Filename)">
+      <Output TaskParameter="Include" ItemName="_WorkerBuildFile" />
     </CreateItem>
-    <CreateItem Include="@(ImageCacheAssembly->'%(RootDir)%(Directory)**\*')">
-      <Output TaskParameter="Include" ItemName="ImageCacheFiles" />
-    </CreateItem>
-    <MakeDir Directories="$(OutDir)workers\ModularMonolith.Worker.SvgRenderer;$(OutDir)workers\ModularMonolith.Worker.ImageCache" />
-    <Copy SourceFiles="@(SvgRendererFiles)" DestinationFiles="@(SvgRendererFiles->'$(OutDir)workers\ModularMonolith.Worker.SvgRenderer\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ImageCacheFiles)" DestinationFiles="@(ImageCacheFiles->'$(OutDir)workers\ModularMonolith.Worker.ImageCache\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+
+    <MakeDir Directories="@(_WorkerAssembly->'$(OutDir)workers\%(Filename)')" />
+    <Copy
+      SourceFiles="@(_WorkerBuildFile)"
+      DestinationFiles="@(_WorkerBuildFile->'$(OutDir)workers\%(WorkerProject)\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="CopyPublishedWorkerOutputs" AfterTargets="Publish">
-    <MSBuild Projects="$(MSBuildProjectDirectory)\..\ModularMonolith.Worker.SvgRenderer\ModularMonolith.Worker.SvgRenderer.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
-      <Output TaskParameter="TargetOutputs" ItemName="PublishedSvgRendererAssembly" />
-    </MSBuild>
-    <MSBuild Projects="$(MSBuildProjectDirectory)\..\ModularMonolith.Worker.ImageCache\ModularMonolith.Worker.ImageCache.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
-      <Output TaskParameter="TargetOutputs" ItemName="PublishedImageCacheAssembly" />
-    </MSBuild>
-    <CreateItem Include="@(PublishedSvgRendererAssembly->'%(RootDir)%(Directory)**\*')">
-      <Output TaskParameter="Include" ItemName="PublishedSvgRendererFiles" />
-    </CreateItem>
-    <CreateItem Include="@(PublishedImageCacheAssembly->'%(RootDir)%(Directory)**\*')">
-      <Output TaskParameter="Include" ItemName="PublishedImageCacheFiles" />
-    </CreateItem>
-    <MakeDir Directories="$(PublishDir)workers\ModularMonolith.Worker.SvgRenderer;$(PublishDir)workers\ModularMonolith.Worker.ImageCache" />
-    <Copy SourceFiles="@(PublishedSvgRendererFiles)" DestinationFiles="@(PublishedSvgRendererFiles->'$(PublishDir)workers\ModularMonolith.Worker.SvgRenderer\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(PublishedImageCacheFiles)" DestinationFiles="@(PublishedImageCacheFiles->'$(PublishDir)workers\ModularMonolith.Worker.ImageCache\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  <!-- Publish every selected worker with the Host publication mode into the distribution bundle. -->
+  <Target Name="CopyPublishedWorkerOutputs" AfterTargets="Publish" Condition="'@(WorkerProject)' != ''">
+    <RemoveDir Directories="$(PublishDir)workers" />
+
+    <MSBuild
+      Projects="@(WorkerProject)"
+      Targets="Publish"
+      BuildInParallel="$(BuildInParallel)"
+      Condition="'%(WorkerProject.PackageAsWorker)' == 'true'"
+      Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);UseAppHost=$(UseAppHost);PublishTrimmed=$(PublishTrimmed);PublishAot=$(PublishAot);PublishDir=$([System.IO.Path]::GetFullPath('$(PublishDir)workers\%(WorkerProject.Filename)\'))" />
   </Target>
 
 </Project>

@@ -307,14 +307,15 @@ public sealed class HostModuleTests
         Assert.Equal(["a", "b"], arguments);
     }
 
-    [WindowsFact]
-    public void WorkerCommandResolver_PrefersTheApphostOnWindows()
+    [Fact]
+    public void WorkerCommandResolver_PrefersTheApphost()
     {
         var directory = Directory.CreateTempSubdirectory("worker-command-");
         try
         {
             var workerDirectory = Directory.CreateDirectory(Path.Combine(directory.FullName, "workers", "Alpha.Worker"));
-            var apphost = Path.Combine(workerDirectory.FullName, "Alpha.Worker.exe");
+            var apphostName = OperatingSystem.IsWindows() ? "Alpha.Worker.exe" : "Alpha.Worker";
+            var apphost = Path.Combine(workerDirectory.FullName, apphostName);
             File.WriteAllText(apphost, string.Empty);
 
             var (executable, arguments) = WorkerCommandResolver.Resolve(Configuration().GetSection("Workers:Alpha"), "Alpha.Worker", directory.FullName);
