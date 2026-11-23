@@ -45,8 +45,7 @@ $hostProjectPath = Join-Path $projectRoot 'src/ModularMonolith.Host/ModularMonol
 
 [xml]$hostProject = Get-Content -LiteralPath $hostProjectPath -Raw
 $workerReferences = @(
-    $hostProject.Project.ItemGroup.ProjectReference |
-        Where-Object { [string]$_.PackageAsWorker -eq 'true' }
+    $hostProject.SelectNodes('/Project/ItemGroup/ProjectReference[@PackageAsWorker="true"]')
 )
 
 if ($workerReferences.Count -eq 0) {
@@ -56,7 +55,7 @@ if ($workerReferences.Count -eq 0) {
 $expectedWorkers = @(
     $workerReferences |
         ForEach-Object {
-            $reference = ([string]$_.Include).Replace('\', '/')
+            $reference = $_.GetAttribute('Include').Replace('\', '/')
             [System.IO.Path]::GetFileNameWithoutExtension($reference)
         } |
         Sort-Object
