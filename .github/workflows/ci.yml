@@ -32,6 +32,25 @@ jobs:
       # Windows-only tests are skipped on Linux and run for real on Windows.
       - name: Test
         run: dotnet test modular-monolith/ModularMonolith.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+      - name: Verify framework-dependent package
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'modular-monolith-framework-dependent'
+          New-Item -ItemType Directory -Path (Join-Path $package 'workers/Stale.Worker') -Force | Out-Null
+          dotnet publish modular-monolith/src/ModularMonolith.Host/ModularMonolith.Host.csproj -c Release -o $package
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File modular-monolith/tests/Verify-Package.ps1 -PackageDirectory $package -PublicationMode FrameworkDependent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify self-contained package
+        shell: pwsh
+        run: |
+          $runtime = if ($IsWindows) { 'win-x64' } else { 'linux-x64' }
+          $package = Join-Path $env:RUNNER_TEMP "modular-monolith-self-contained-$runtime"
+          New-Item -ItemType Directory -Path (Join-Path $package 'workers/Stale.Worker') -Force | Out-Null
+          dotnet publish modular-monolith/src/ModularMonolith.Host/ModularMonolith.Host.csproj -c Release -r $runtime --self-contained true -o $package
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File modular-monolith/tests/Verify-Package.ps1 -PackageDirectory $package -PublicationMode SelfContained
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify test reports
         shell: pwsh
         run: |

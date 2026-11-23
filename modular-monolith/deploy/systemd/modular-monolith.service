@@ -9,7 +9,7 @@ Type=exec
 User=modularmonolith
 Group=modularmonolith
 WorkingDirectory=/opt/modular-monolith
-ExecStart=/usr/bin/dotnet /opt/modular-monolith/ModularMonolith.Host.dll
+ExecStart=/opt/modular-monolith/ModularMonolith.Host
 Environment=ASPNETCORE_URLS=http://127.0.0.1:5227
 Delegate=yes
 Slice=modular-monolith.slice

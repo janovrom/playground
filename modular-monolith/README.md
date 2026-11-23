@@ -25,6 +25,19 @@ dotnet test modular-monolith/ModularMonolith.slnx
 
 *Note: Windows-specific tests (exercising Win32 Job Objects and Named Pipes) are automatically skipped when running on Linux.*
 
+### Publish
+```bash
+# Framework-dependent bundle
+dotnet publish modular-monolith/src/ModularMonolith.Host/ModularMonolith.Host.csproj \
+  -c Release -o ./artifacts/package
+
+# Self-contained Linux bundle
+dotnet publish modular-monolith/src/ModularMonolith.Host/ModularMonolith.Host.csproj \
+  -c Release -r linux-x64 --self-contained true -o ./artifacts/package-linux
+```
+
+The Host project packages each worker reference marked with `PackageAsWorker="true"` into `workers/<ProjectName>`. The package also contains the platform-specific service and installation scripts.
+
 ### Running Locally (Development Mode)
 ```bash
 # Run the host directly (starts child workers automatically with Job:Enabled=false in dev)
