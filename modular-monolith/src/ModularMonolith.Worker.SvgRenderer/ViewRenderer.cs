@@ -1,13 +1,17 @@
 using ModularMonolith.Contracts;
 
+namespace ModularMonolith.Worker.SvgRenderer;
+
+/// <summary>Renders HTML pages that contain generated SVG content.</summary>
 public static class ViewRenderer
 {
+    /// <summary>Renders a page that displays the requested SVG and its grid settings.</summary>
     public static string RenderPage(GridSettings settings, string svgContent) => $$"""
         <!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
-            <title>Functional Grid Generator</title>
+            <title>Grid Generator</title>
             <style>
                 body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
                 .card { background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); text-align: center; max-width: 400px; }
