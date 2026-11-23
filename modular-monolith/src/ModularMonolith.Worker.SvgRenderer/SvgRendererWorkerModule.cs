@@ -21,6 +21,11 @@ public sealed class SvgRendererWorkerModule : IWorkerModule
 
         app.MapPost("/render/svg", (GridSettings settings) => RenderSvg(settings));
 
+        app.MapGet("/render/text", (string? text) =>
+            PixelTextSvgGenerator.TryRenderSvg(text, out var svg)
+                ? Results.Content(svg, "image/svg+xml")
+                : Results.BadRequest());
+
         app.MapPost("/render/page", (RenderPageRequest request) =>
         {
             if (!IsValid(request.Settings) || string.IsNullOrWhiteSpace(request.SvgContent))
