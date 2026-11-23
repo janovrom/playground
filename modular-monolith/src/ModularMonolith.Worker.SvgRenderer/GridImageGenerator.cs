@@ -1,5 +1,7 @@
 using ModularMonolith.Contracts;
 
+namespace ModularMonolith.Worker.SvgRenderer;
+
 /// <summary>Renders discrete grid patterns as SVG.</summary>
 public static class GridImageGenerator
 {
