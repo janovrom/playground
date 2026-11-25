@@ -10,6 +10,7 @@ internal sealed class TrackedWorkerTransport(IWorkerTransport inner) : IWorkerTr
     private readonly object _gate = new();
     private TaskCompletionSource? _writeObserved;
     private TaskCompletionSource? _releaseWrite;
+    private bool _holdBeforeWrite;
     private int _opened;
     private int _closed;
 
@@ -19,6 +20,13 @@ internal sealed class TrackedWorkerTransport(IWorkerTransport inner) : IWorkerTr
 
     /// <summary>Holds the next request write after its bytes reach the transport.</summary>
     public Task HoldNextWrite()
+        => HoldNextWrite(beforeWrite: false);
+
+    /// <summary>Holds the next request write before its bytes reach the transport.</summary>
+    public Task HoldNextWriteBeforeSending()
+        => HoldNextWrite(beforeWrite: true);
+
+    private Task HoldNextWrite(bool beforeWrite)
     {
         lock (_gate)
         {
@@ -29,6 +37,7 @@ internal sealed class TrackedWorkerTransport(IWorkerTransport inner) : IWorkerTr
 
             _writeObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _releaseWrite = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _holdBeforeWrite = beforeWrite;
             return _writeObserved.Task;
         }
     }
@@ -41,6 +50,7 @@ internal sealed class TrackedWorkerTransport(IWorkerTransport inner) : IWorkerTr
             _releaseWrite?.TrySetResult();
             _releaseWrite = null;
             _writeObserved = null;
+            _holdBeforeWrite = false;
         }
     }
 
@@ -90,7 +100,22 @@ internal sealed class TrackedWorkerTransport(IWorkerTransport inner) : IWorkerTr
     {
         lock (_gate)
         {
-            if (_writeObserved is null || _releaseWrite is null)
+            if (_holdBeforeWrite || _writeObserved is null || _releaseWrite is null)
+            {
+                return null;
+            }
+
+            _writeObserved.TrySetResult();
+            _writeObserved = null;
+            return _releaseWrite.Task;
+        }
+    }
+
+    private Task? BeforeWrite()
+    {
+        lock (_gate)
+        {
+            if (!_holdBeforeWrite || _writeObserved is null || _releaseWrite is null)
             {
                 return null;
             }
@@ -140,8 +165,14 @@ internal sealed class TrackedWorkerTransport(IWorkerTransport inner) : IWorkerTr
         /// <summary>Writes bytes asynchronously, observing a test-controlled request gate.</summary>
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            var gate = owner.BeforeWrite();
+            if (gate is not null)
+            {
+                await gate.WaitAsync(cancellationToken);
+            }
+
             await inner.WriteAsync(buffer, cancellationToken);
-            var gate = owner.AfterWrite();
+            gate = owner.AfterWrite();
             if (gate is not null)
             {
                 await gate.WaitAsync(cancellationToken);

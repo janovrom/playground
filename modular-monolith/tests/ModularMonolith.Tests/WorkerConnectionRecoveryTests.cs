@@ -81,7 +81,7 @@ public sealed class WorkerConnectionRecoveryTests
                     "pattern=checkerboard&size=2",
                     null,
                     []));
-                var writeObserved = tracked.HoldNextWrite();
+                var writeObserved = tracked.HoldNextWriteBeforeSending();
                 var request = renderer.RenderSvgAsync(settings, CancellationToken.None);
                 try
                 {
