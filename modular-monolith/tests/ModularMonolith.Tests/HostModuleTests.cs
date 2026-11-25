@@ -13,6 +13,7 @@ namespace ModularMonolith.Tests;
 
 public sealed class HostModuleTests
 {
+    /// <summary>Verifies the manager creates one status entry for each registered module.</summary>
     [Fact]
     public void WorkerManager_ManagesExactlyTheRegisteredModules()
     {
@@ -22,6 +23,7 @@ public sealed class HostModuleTests
         Assert.All(manager.GetStatus(), status => Assert.Equal("Stopped", status.State));
     }
 
+    /// <summary>Verifies worker launches receive resolved arguments, limits, and signing context.</summary>
     [Fact]
     public async Task WorkerManager_LaunchesModulesWithTransportEndpointArgumentsAndLimits()
     {
@@ -52,6 +54,7 @@ public sealed class HostModuleTests
         Assert.False(Directory.Exists(endpointDirectory), "A failed start must release the temporary endpoint directory.");
     }
 
+    /// <summary>Verifies worker launch options use module defaults when no limits are configured.</summary>
     [Fact]
     public async Task WorkerManager_UsesDefaultLimitsOfTheModuleWhenNothingIsConfigured()
     {
@@ -65,6 +68,7 @@ public sealed class HostModuleTests
             Assert.Single(launcher.Launches).Limits);
     }
 
+    /// <summary>Verifies endpoints are unavailable until worker startup allocates them.</summary>
     [Fact]
     public void WorkerManager_ReportsAnUnallocatedEndpointBeforeStart()
     {
@@ -76,6 +80,7 @@ public sealed class HostModuleTests
         Assert.Throws<InvalidOperationException>(() => manager.IsRunning("unknown"));
     }
 
+    /// <summary>Verifies safe worker requests retry transient connection failures twice.</summary>
     [Fact]
     public async Task WorkerResilience_RetriesTransientConnectionFailuresTwice()
     {
@@ -98,14 +103,40 @@ public sealed class HostModuleTests
         client.BaseAddress = new Uri("http://localhost");
         var stopwatch = Stopwatch.StartNew();
 
-        using var content = new StringContent("payload");
-        using var response = await client.PostAsync("/", content);
+        using var response = await client.GetAsync("/");
 
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(3, attempts);
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Retries exceeded the 2-second restart window: {stopwatch.Elapsed}.");
     }
 
+    /// <summary>Verifies unsafe worker methods do not retry failed requests.</summary>
+    [Theory]
+    [InlineData("POST")]
+    [InlineData("PUT")]
+    public async Task WorkerResilience_DoesNotRetryUnsafeMethods(string method)
+    {
+        var attempts = 0;
+        var services = new ServiceCollection();
+        services.AddWorkerHttpResilience();
+        services.AddHttpClient("retry-test")
+            .ConfigurePrimaryHttpMessageHandler(() => new CallbackHandler((_, _) =>
+            {
+                Interlocked.Increment(ref attempts);
+                throw new HttpRequestException("Transient connection failure.");
+            }));
+
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("retry-test");
+        client.BaseAddress = new Uri("http://localhost");
+        using var request = new HttpRequestMessage(new HttpMethod(method), "/");
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request));
+
+        Assert.Equal(1, attempts);
+    }
+
+    /// <summary>Verifies safe worker requests stop after the configured retry budget.</summary>
     [Fact]
     public async Task WorkerResilience_StopsAfterTwoRetries()
     {
@@ -130,6 +161,7 @@ public sealed class HostModuleTests
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Retries exceeded the 2-second restart window: {stopwatch.Elapsed}.");
     }
 
+    /// <summary>Verifies configured worker timeouts and the ten-second default.</summary>
     [Fact]
     public async Task WorkerClientFactory_UsesConfiguredTimeoutAndDefaultsToTenSeconds()
     {
@@ -156,6 +188,7 @@ public sealed class HostModuleTests
         Assert.Equal(TimeSpan.FromSeconds(10), defaultClient.Timeout);
     }
 
+    /// <summary>Verifies non-positive worker timeouts are rejected.</summary>
     [Theory]
     [InlineData("0")]
     [InlineData("-1")]
@@ -171,6 +204,7 @@ public sealed class HostModuleTests
         Assert.Throws<InvalidOperationException>(() => factory.Create("alpha", "Alpha"));
     }
 
+    /// <summary>Verifies worker requests are blocked while a worker is unavailable.</summary>
     [Fact]
     public async Task WorkerReadinessHandler_DoesNotSendWhileWorkerIsUnavailable()
     {
@@ -190,6 +224,7 @@ public sealed class HostModuleTests
         Assert.Equal(1, inner.RequestCount);
     }
 
+    /// <summary>Verifies safe requests retry until worker readiness returns.</summary>
     [Fact]
     public async Task WorkerResilience_RetriesRequestsUntilWorkerReadinessReturns()
     {
@@ -204,14 +239,14 @@ public sealed class HostModuleTests
         using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("alpha");
         client.BaseAddress = new Uri("http://localhost");
 
-        using var content = new StringContent("payload");
-        using var response = await client.PostAsync("/", content);
+        using var response = await client.GetAsync("/");
 
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(3, resolver.ReadinessChecks);
         Assert.Equal(1, inner.RequestCount);
     }
 
+    /// <summary>Verifies module customization registers its services.</summary>
     [Fact]
     public void AddHostModuleCustomization_RegistersTheModuleAndItsServices()
     {
@@ -223,6 +258,7 @@ public sealed class HostModuleTests
         Assert.Equal("alpha", provider.GetRequiredService<AlphaMarker>().Module);
     }
 
+    /// <summary>Verifies descriptor composition rejects customizations for unknown modules.</summary>
     [Fact]
     public void HostModuleDescriptorComposer_RejectsUnknownCustomization()
     {
@@ -234,6 +270,7 @@ public sealed class HostModuleTests
         Assert.Contains("unknown module 'alpha'", exception.Message);
     }
 
+    /// <summary>Verifies descriptor composition rejects duplicate customizations.</summary>
     [Fact]
     public void HostModuleDescriptorComposer_RejectsDuplicateCustomizations()
     {
@@ -245,6 +282,7 @@ public sealed class HostModuleTests
         Assert.Contains("module 'alpha' is registered more than once", exception.Message);
     }
 
+    /// <summary>Verifies generated clients are registered against their declared workers.</summary>
     [Fact]
     public void BuiltInModules_RegisterTheirTypedClientsAgainstTheirOwnWorker()
     {
@@ -261,6 +299,7 @@ public sealed class HostModuleTests
         Assert.Equal(ModuleCatalog.All.Order(), provider.GetServices<HostModuleDescriptor>().Select(module => module.Name).Order());
     }
 
+    /// <summary>Verifies generated clients dispose their HTTP handlers with the provider.</summary>
     [Fact]
     public void BuiltInClients_DisposeTheirHttpClientsWithTheServiceProvider()
     {
@@ -277,6 +316,7 @@ public sealed class HostModuleTests
         Assert.True(handler.Disposed);
     }
 
+    /// <summary>Verifies the image cache customization forwards its database path.</summary>
     [Fact]
     public void ImageCacheModule_PassesTheConfiguredDatabasePathToItsWorker()
     {
@@ -286,6 +326,7 @@ public sealed class HostModuleTests
         Assert.Equal(["--ImageCache:DatabasePath=/data/cache.db"], arguments);
     }
 
+    /// <summary>Verifies the command resolver defaults to the dotnet worker assembly.</summary>
     [Fact]
     public void WorkerCommandResolver_DefaultsToDotnetAndTheWorkerAssembly()
     {
@@ -295,6 +336,7 @@ public sealed class HostModuleTests
         Assert.Equal([Path.Combine("base", "workers", "Alpha.Worker", "Alpha.Worker.dll")], arguments);
     }
 
+    /// <summary>Verifies the command resolver prefers explicitly configured commands.</summary>
     [Fact]
     public void WorkerCommandResolver_PrefersConfiguredCommand()
     {
@@ -307,6 +349,7 @@ public sealed class HostModuleTests
         Assert.Equal(["a", "b"], arguments);
     }
 
+    /// <summary>Verifies the command resolver prefers an available worker apphost.</summary>
     [Fact]
     public void WorkerCommandResolver_PrefersTheApphost()
     {
@@ -362,8 +405,14 @@ public sealed class HostModuleTests
         public string ModuleName => Name;
         public string WorkerProject => "Alpha.Worker";
         public string ConfigSection => "Alpha";
+
+        /// <summary>Applies the test module's worker process limit.</summary>
         public JobLimits CustomizeLimits(JobLimits defaults) => defaults with { MaxProcesses = 10 };
+
+        /// <summary>Returns the test module's worker launch argument.</summary>
         public IEnumerable<string> GetWorkerArguments(IConfiguration configuration) => ["--alpha-arg=1"];
+
+        /// <summary>Registers a marker service for the test module.</summary>
         public void ConfigureServices(IServiceCollection services) => services.AddSingleton(new AlphaMarker(Name));
     }
 
@@ -376,6 +425,7 @@ public sealed class HostModuleTests
     {
         public List<string> Requested { get; } = [];
 
+        /// <summary>Creates a test client and records the worker name.</summary>
         public HttpClient Create(string moduleName, string configSection)
         {
             Requested.Add(moduleName);
@@ -389,12 +439,19 @@ public sealed class HostModuleTests
         public int UnavailableChecks { get; set; } = int.MaxValue;
         public int ReadinessChecks { get; private set; }
 
+        /// <summary>Returns a placeholder endpoint for the test worker.</summary>
         public WorkerEndpoint GetEndpoint(string name) => new(UnixSocketTransport.TransportName, "/tmp/test.sock");
 
+        /// <summary>Reports readiness according to the test's configured check count.</summary>
         public bool IsRunning(string name)
         {
             ReadinessChecks++;
             return Running || ReadinessChecks > UnavailableChecks;
+        }
+
+        /// <summary>Ignores worker failures because the resolver has no process supervisor.</summary>
+        public void ObserveWorkerFailure(string name)
+        {
         }
     }
 
@@ -402,6 +459,7 @@ public sealed class HostModuleTests
     {
         public int RequestCount { get; private set; }
 
+        /// <summary>Counts requests and invokes the test response callback.</summary>
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestCount++;
@@ -413,6 +471,7 @@ public sealed class HostModuleTests
     {
         public bool Disposed { get; private set; }
 
+        /// <summary>Returns a successful response for the test request.</summary>
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
 
@@ -425,6 +484,7 @@ public sealed class HostModuleTests
 
     private sealed class FixedClientFactory(HttpClient client) : IWorkerClientFactory
     {
+        /// <summary>Creates the configured test HTTP client.</summary>
         public HttpClient Create(string moduleName, string configSection) => client;
     }
 
@@ -433,6 +493,7 @@ public sealed class HostModuleTests
     {
         public List<WorkerLaunchOptions> Launches { get; } = [];
 
+        /// <summary>Records launch options and returns a process that exits immediately.</summary>
         public WorkerProcess Launch(WorkerLaunchOptions options)
         {
             Launches.Add(options);

@@ -12,6 +12,7 @@ The system architecture combines the operational simplicity of a **monolithic de
 ┌────────────────────────────────────────────────────────────────────────┐
 │ TIER 1: HOST ORCHESTRATOR & EDGE GATEWAY                               │
 │  ├── Gateway / Reverse Proxy (Unified HTTP Ingress over IPC)           │
+│  ├── Operator API (separate loopback management listener)              │
 │  ├── Module Process Supervisor & Lifecycle Watchdog                    │
 │  ├── Edge Security Boundary (Authentication & Context Propagation)     │
 │  └── Central Asynchronous Event Bus (System.Threading.Channels)        │
@@ -34,7 +35,7 @@ The system architecture combines the operational simplicity of a **monolithic de
 ```
 
 ### Core Architecture Invariants
-1. **Single Public Port / Host Process**: The Host is the only process exposed to the network or user requests.
+1. **Single Host Process / Public Gateway**: The Host is the only process exposed to public traffic. Operator management APIs use a separate loopback listener.
 2. **OS-Level Isolation**: Modules run in dedicated child worker processes bounded by operating system kernel limits. A native memory leak, crash, or unhandled exception in one worker cannot bring down the Host or other workers.
 3. **No Network Loopback for IPC**: Communication between Host and workers uses kernel IPC primitives (Unix Domain Sockets on Linux, Named Pipes on Windows, or shared memory).
 4. **Deterministic Orphan Elimination**: If the Host process terminates abruptly (e.g., `SIGKILL`, crash, power loss), the kernel automatically cleans up all child worker processes without orphan state.
@@ -85,10 +86,11 @@ All OS-specific features are abstracted through cross-platform contracts in `Mod
 
 ### Tier 1: Host Orchestrator & Gateway Edge
 The Host process serves as the sole public entry point, security boundary, and lifecycle supervisor for all workers.
-* **Gateway Routing**: YARP routes declared worker paths over private UDS or Named Pipe transports. Worker readiness controls destination availability, and unavailable clusters return a problem-details HTTP 503 response.
+* **Gateway Routing**: YARP routes declared worker paths over private UDS or Named Pipe transports. Worker readiness controls destination availability, and unavailable clusters return a problem-details HTTP 503 response. YARP forwarding has no added retries.
 * **Gateway Security Context**: The Host replaces external internal-context headers with a short-lived HMAC-signed payload. Only configured `HttpContext.User` claim types are forwarded. Each Host run passes a 256-bit key to child workers through an environment variable.
 * **Worker Lifecycle Supervisor (`WorkerManager`)**: Launches workers with allocated transport endpoints and resource limits, monitors child exit status, cleans up stale transport artifacts, and restarts failed processes with exponential backoff (1s to 30s).
-* **Request Drain Gate (`RequestDrainTracker`)**: Tracks in-flight public HTTP requests. During host termination, it rejects new ingress requests (HTTP 503) and ensures active requests complete before workers are stopped.
+* **Request Drain Gate (`RequestDrainTracker`)**: Tracks in-flight Host HTTP requests. During host termination, it rejects new ingress requests (HTTP 503) and ensures active requests complete before workers are stopped.
+* **Operator Management Listener**: Binds to `127.0.0.1:5228` by default, separate from public listeners. It exposes circuit reset and dead-letter inspection routes without application authentication. A non-loopback bind requires deployment-level network access controls.
 
 ### Tier 2: Worker Runtime & Process Isolation
 Each worker process executes within a sandboxed kernel container.
@@ -119,7 +121,23 @@ flowchart LR
 Protects the Host from cascading failures and crash-looping workers:
 * **Drain & Timeout**: Graceful shutdown bounded by `Workers:ShutdownGracePeriod` (default 10s) with hard termination fallback.
 * **Exponential Backoff**: Exited workers restart with backoff delays capped at 30 seconds; stable runs (>1 minute) reset backoff to 1 second.
-* **Target Roadmap**: Rolling-window circuit breakers, poison-pill quarantine, and zero-downtime route swapping (see [Backlog](../backlog/README.md)).
+* **Worker Circuit Breaker**: `Workers:CircuitBreaker:MaxCrashes` defaults to 3 and `Workers:CircuitBreaker:WindowSeconds` defaults to 120. Each worker tracks unexpected exits independently. It enters `Open` at the threshold and does not restart until `POST /modules/{name}/reset` succeeds.
+* **Poison-Payload Quarantine**: The Host hashes each worker-bound request using its method, canonical path and query, and raw body. It buffers at most 1 MiB per request. A fingerprint is attributed to a crash only when it is the unique active fingerprint for that worker. Two correlated crashes within 120 seconds quarantine it. Matching requests receive HTTP 422; oversized requests receive HTTP 413.
+* **Dead-Letter Storage**: Quarantined request metadata and raw bodies stay in memory, up to 100 records and 10 MiB of body data. FIFO eviction removes both the record and its quarantine. Host restart clears the store; circuit reset does not.
+
+```mermaid
+flowchart LR
+    Request[Worker-bound request] --> Fingerprint[Buffer and fingerprint]
+    Fingerprint --> Worker[Worker request]
+    Worker -->|HTTP response| Clear[Clear prior crash evidence for fingerprint]
+    Worker -->|Unexpected process exit| Window[Per-worker rolling crash window]
+    Window -->|Threshold reached| Open[Open circuit and suppress restart]
+    Open -->|Local operator reset| Restart[Restart worker]
+    Window --> Correlate[Correlate unique active fingerprint]
+    Correlate -->|Second crash within window| Quarantine[Store dead letter and quarantine fingerprint]
+    Quarantine --> Reject[Reject matching requests with HTTP 422]
+    Open --> Unavailable[Reject worker requests with HTTP 503]
+```
 
 ---
 
@@ -142,11 +160,11 @@ Protects the Host from cascading failures and crash-looping workers:
 
 | Capability / Component | Shipped Implementation (Today) | Target Architecture (Backlog) | Tracking Item |
 |---|---|---|---|
-| **Gateway Routing** | Generated descriptor and client registration feeding the BL-0002 YARP dynamic proxy | Circuit breaking | `BL-0002`, `BL-0003`, `BL-0005` |
-| **Transport Resilience** | Microsoft HTTP resilience pipeline (two bounded jittered retries), per-worker timeouts, and lifecycle readiness gating | Circuit breaking and additional connection-pool controls | `BL-0001`, `BL-0005` |
+| **Gateway Routing** | Generated descriptor and client registration feeding the BL-0002 YARP dynamic proxy; open circuits remove worker destinations and unavailable routes return HTTP 503 | Additional connection-pool controls | `BL-0002`, `BL-0003`, `BL-0005` |
+| **Transport Resilience** | Typed worker clients retry safe methods only (two bounded jittered retries), with per-worker timeouts and lifecycle readiness gating; YARP has no added retries | Additional connection-pool controls | `BL-0001`, `BL-0005` |
 | **Module Code Generation** | `WorkerSourceGenerator` emits Host wiring, typed clients, and worker entry points without runtime reflection | Additional metadata and client operation shapes as modules require them | `BL-0003` |
 | **Build & Packaging** | Dynamic MSBuild batching of marked worker project references into framework-dependent or self-contained `workers/<ProjectName>` bundles | Extend the same bundle contract as new worker RIDs and publication modes are added | `BL-0004` |
-| **Crash Loop Protection** | Exponential backoff restart (1s–30s) | Sliding-window circuit breaker & Poison Pill quarantine | `BL-0005` |
+| **Crash Loop Protection** | Exponential backoff plus per-worker rolling-window circuit breakers, poison-payload quarantine, and bounded in-memory dead-letter storage | — | `BL-0005` |
 | **High-Throughput IPC** | Kestrel over UDS / Named Pipes with JSON | Shared Memory (MMF) ring buffer for sub-millisecond streaming | `BL-0006` |
 
 ---

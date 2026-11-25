@@ -1,5 +1,7 @@
-using ModularMonolith.Platform.Transport;
+using System.Net.Sockets;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
+using ModularMonolith.Platform.Transport;
 using Polly;
 
 namespace ModularMonolith.Host;
@@ -11,6 +13,9 @@ internal interface IWorkerEndpointResolver
 
     /// <summary>Reports whether a registered worker is ready for requests.</summary>
     bool IsRunning(string name);
+
+    /// <summary>Records a worker exit observed while forwarding a request.</summary>
+    void ObserveWorkerFailure(string name);
 }
 
 internal interface IWorkerClientFactory
@@ -39,18 +44,46 @@ internal sealed class WorkerClientFactory(IHttpClientFactory clients, IConfigura
 internal sealed class WorkerReadinessHandler(
     string moduleName,
     IWorkerEndpointResolver endpoints,
+    WorkerRequestTracker? requestTracker = null,
+    IHttpContextAccessor? httpContextAccessor = null,
     Action<WorkerReadinessHandler>? onDispose = null) : DelegatingHandler
 {
     private int _disposed;
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        var workerRequest = httpContextAccessor?.HttpContext?.Items[WorkerRequestContext.ItemKey] as WorkerRequestContext;
+        if (workerRequest is not null && requestTracker?.IsQuarantined(moduleName, workerRequest.Fingerprint) == true)
+        {
+            throw new PoisonPillException(moduleName, workerRequest.Fingerprint);
+        }
+
         if (!endpoints.IsRunning(moduleName))
         {
             throw new HttpRequestException($"Worker '{moduleName}' is not ready to receive requests.");
         }
 
-        return base.SendAsync(request, cancellationToken);
+        using var lease = workerRequest is null ? null : requestTracker?.Track(moduleName, workerRequest);
+        try
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            if (workerRequest is not null)
+            {
+                requestTracker?.RecordWorkerResponse(moduleName, workerRequest);
+            }
+
+            return response;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or SocketException or IOException)
+        {
+            endpoints.ObserveWorkerFailure(moduleName);
+            if (workerRequest?.IsPoisoned == true)
+            {
+                throw new PoisonPillException(moduleName, workerRequest.Fingerprint, exception);
+            }
+
+            throw;
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -69,7 +102,11 @@ internal sealed class WorkerReadinessHandler(
     }
 }
 
-internal sealed class WorkerTransportHandlerRegistry(IWorkerTransport transport, IWorkerEndpointResolver endpoints) : IDisposable
+internal sealed class WorkerTransportHandlerRegistry(
+    IWorkerTransport transport,
+    IWorkerEndpointResolver endpoints,
+    WorkerRequestTracker requestTracker,
+    IHttpContextAccessor httpContextAccessor) : IDisposable
 {
     private readonly object _gate = new();
     private readonly HashSet<WorkerReadinessHandler> _handlers = [];
@@ -81,7 +118,7 @@ internal sealed class WorkerTransportHandlerRegistry(IWorkerTransport transport,
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var handler = new WorkerReadinessHandler(moduleName, endpoints, Remove)
+            var handler = new WorkerReadinessHandler(moduleName, endpoints, requestTracker, httpContextAccessor, Remove)
             {
                 InnerHandler = transport.CreateClientHandler(endpoints.GetEndpoint(moduleName))
             };
@@ -121,23 +158,51 @@ internal sealed class WorkerTransportHandlerRegistry(IWorkerTransport transport,
     }
 }
 
+internal sealed class SafeMethodRetryHandler : DelegatingHandler
+{
+    private readonly ResiliencePipeline<HttpResponseMessage> _pipeline;
+
+    /// <summary>Creates a retry handler for safe HTTP methods only.</summary>
+    public SafeMethodRetryHandler()
+    {
+        var options = new HttpRetryStrategyOptions
+        {
+            MaxRetryAttempts = 2,
+            Delay = TimeSpan.FromMilliseconds(100),
+            MaxDelay = TimeSpan.FromMilliseconds(500),
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            ShouldRetryAfterHeader = false
+        };
+        _pipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(options)
+            .Build();
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (request.Method.Method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE"))
+        {
+            return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await _pipeline.ExecuteAsync(
+            async token => await base.SendAsync(request, token).ConfigureAwait(false),
+            cancellationToken).ConfigureAwait(false);
+    }
+}
+
 internal static class WorkerHttpClientServiceCollectionExtensions
 {
     /// <summary>Registers worker HTTP resilience and transport handler ownership.</summary>
     public static IServiceCollection AddWorkerHttpResilience(this IServiceCollection services)
     {
         services.AddSingleton<WorkerTransportHandlerRegistry>();
+        services.TryAddSingleton<WorkerRequestTracker>();
+        services.AddHttpContextAccessor();
+        services.AddTransient<SafeMethodRetryHandler>();
         services.AddHttpClient();
-        services.ConfigureHttpClientDefaults(builder => builder.AddResilienceHandler("worker-retry", pipeline =>
-            pipeline.AddRetry(new HttpRetryStrategyOptions
-            {
-                MaxRetryAttempts = 2,
-                Delay = TimeSpan.FromMilliseconds(100),
-                MaxDelay = TimeSpan.FromMilliseconds(500),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                ShouldRetryAfterHeader = false
-            })));
+        services.ConfigureHttpClientDefaults(builder => builder.AddHttpMessageHandler<SafeMethodRetryHandler>());
         return services;
     }
 }

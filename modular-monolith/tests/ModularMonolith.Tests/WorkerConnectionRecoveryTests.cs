@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -37,6 +38,105 @@ public sealed class WorkerConnectionRecoveryTests
     [SupportedOSPlatform("windows")]
     public async Task NamedPipe_InFlightCrashRecoversAndClosesConnections()
         => await AssertRecoveryAsync(new NamedPipeTransport(), new JobWorkerLauncher(new WindowsJobFactory(), new NamedEventStopStrategy()));
+
+    /// <summary>Verifies two crashes correlated with one request quarantine its payload.</summary>
+    [LinuxFact]
+    public async Task UnixSocket_RepeatedPayloadCrashesAreQuarantined()
+    {
+        var directory = Directory.CreateTempSubdirectory("worker-poison-test-");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Workers:SocketDirectory"] = directory.FullName,
+                ["Workers:StartupTimeoutSeconds"] = "30",
+                ["Workers:ShutdownGracePeriod"] = "10",
+                ["Workers:SvgRenderer:Arguments:0"] = Path.Combine(AppContext.BaseDirectory, "ModularMonolith.Worker.SvgRenderer.dll")
+            })
+            .Build();
+        var tracked = new TrackedWorkerTransport(new UnixSocketTransport());
+        var requestTracker = new WorkerRequestTracker(configuration);
+        var manager = new WorkerManager(
+            new LocalWorkerLauncher(new SigTermStopStrategy()),
+            tracked,
+            TestHostModuleCatalog.Create(ModuleCatalog.SvgRenderer),
+            configuration,
+            NullLogger<WorkerManager>.Instance,
+            new RequestDrainTracker(),
+            requestTracker: requestTracker);
+        using var clients = new WorkerClientTestServices(manager, tracked, configuration);
+
+        try
+        {
+            await manager.StartAsync(CancellationToken.None);
+            var renderer = clients.GetRequiredService<IRendererClient>();
+            var settings = new GridSettings(2, GridPattern.Checkerboard);
+            for (var crash = 1; crash <= 2; crash++)
+            {
+                var processId = Assert.Single(manager.GetStatus()).ProcessId;
+                Assert.NotNull(processId);
+                clients.SetWorkerRequest(new WorkerRequestContext(
+                    "repeated-grid-request",
+                    "GET",
+                    "/",
+                    "pattern=checkerboard&size=2",
+                    null,
+                    []));
+                var writeObserved = tracked.HoldNextWrite();
+                var request = renderer.RenderSvgAsync(settings, CancellationToken.None);
+                try
+                {
+                    await writeObserved.WaitAsync(TimeSpan.FromSeconds(10));
+                    using var workerProcess = Process.GetProcessById(processId.Value);
+                    Assert.False(workerProcess.HasExited);
+                    workerProcess.Kill();
+                    await workerProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                finally
+                {
+                    tracked.ReleaseWrite();
+                }
+
+                if (crash == 1)
+                {
+                    await Assert.ThrowsAsync<HttpRequestException>(() => request);
+                    await WaitForWorkerStateAsync(manager, "Running", TimeSpan.FromSeconds(15));
+                }
+                else
+                {
+                    await Assert.ThrowsAsync<PoisonPillException>(() => request);
+                }
+            }
+
+            var deadLetter = Assert.Single(requestTracker.GetDeadLetters(ModuleCatalog.SvgRenderer));
+            Assert.Equal("repeated-grid-request", deadLetter.Fingerprint);
+            Assert.True(requestTracker.IsQuarantined(ModuleCatalog.SvgRenderer, deadLetter.Fingerprint));
+        }
+        finally
+        {
+            tracked.ReleaseWrite();
+            await manager.StopAsync(CancellationToken.None);
+            directory.Delete(recursive: true);
+        }
+
+        await tracked.WaitForNoConnectionsAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private static async Task WaitForWorkerStateAsync(WorkerManager manager, string expectedState, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        do
+        {
+            if (Assert.Single(manager.GetStatus()).State == expectedState)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+        while (stopwatch.Elapsed < timeout);
+
+        Assert.Fail($"Worker did not reach state '{expectedState}'.");
+    }
 
     private static async Task AssertTrackingDetectsLeakAsync(IWorkerTransport transport)
     {

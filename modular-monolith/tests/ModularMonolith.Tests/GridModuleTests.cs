@@ -18,6 +18,7 @@ namespace ModularMonolith.Tests;
 
 public sealed class GridModuleTests
 {
+    /// <summary>Verifies the SVG renderer exposes GET and POST routes.</summary>
     [Fact]
     public void SvgRenderer_MapsGetAndPostForSvgRendering()
     {
@@ -36,6 +37,7 @@ public sealed class GridModuleTests
         Assert.Contains(HttpMethods.Post, methods);
     }
 
+    /// <summary>Verifies the SVG renderer exposes a GET route for pixel text.</summary>
     [Fact]
     public void SvgRenderer_MapsGetForPixelTextRendering()
     {
@@ -53,6 +55,7 @@ public sealed class GridModuleTests
         Assert.Contains(HttpMethods.Get, methods);
     }
 
+    /// <summary>Verifies grid settings normalize patterns and dimensions.</summary>
     [Theory]
     [InlineData(null, null, 6, GridPattern.Checkerboard)]
     [InlineData("radial", 3, 3, GridPattern.Radial)]
@@ -64,6 +67,7 @@ public sealed class GridModuleTests
         Assert.Equal(new GridSettings(expectedSize, expectedPattern), GridRequestParser.Parse(pattern, size));
     }
 
+    /// <summary>Verifies equivalent normalized settings produce the same cache key.</summary>
     [Fact]
     public void CacheKey_IsBasedOnNormalizedSettings()
     {
@@ -75,6 +79,7 @@ public sealed class GridModuleTests
         Assert.Equal("grid-v1-radial-6", GridCacheKey.Create(new GridSettings(6, GridPattern.Radial)));
     }
 
+    /// <summary>Verifies checkerboard SVG generation is deterministic.</summary>
     [Fact]
     public void RenderSvg_IsDeterministicAndContainsExpectedTiles()
     {
@@ -88,6 +93,7 @@ public sealed class GridModuleTests
         Assert.Contains("width=\"300\"", svg);
     }
 
+    /// <summary>Verifies radial SVG generation uses concentric rings.</summary>
     [Fact]
     public void RenderSvg_RadialPatternUsesConcentricEuclideanRings()
     {
@@ -100,6 +106,7 @@ public sealed class GridModuleTests
         Assert.Equal(FillAt(svg, 0, 1, 7), FillAt(svg, 6, 1, 7));
     }
 
+    /// <summary>Verifies pixel-text SVG output uses crisp five-by-seven glyphs.</summary>
     [Fact]
     public void PixelTextSvgGenerator_RendersCrispFiveBySevenPixels()
     {
@@ -114,6 +121,7 @@ public sealed class GridModuleTests
         Assert.Contains("<rect x=\"10\" y=\"0\" width=\"10\" height=\"10\"", svg);
     }
 
+    /// <summary>Verifies pixel-text SVG dimensions account for spaces.</summary>
     [Fact]
     public void PixelTextSvgGenerator_UsesFixedHeightAndAccountsForSpaces()
     {
@@ -124,6 +132,7 @@ public sealed class GridModuleTests
         Assert.Equal(38, Count(svg, "<rect "));
     }
 
+    /// <summary>Verifies pixel-text SVG generation accepts the maximum input length.</summary>
     [Fact]
     public void PixelTextSvgGenerator_AcceptsTheMaximumLength()
     {
@@ -133,6 +142,7 @@ public sealed class GridModuleTests
         Assert.Equal(360, Count(svg, "<rect "));
     }
 
+    /// <summary>Verifies pixel-text SVG generation rejects invalid inputs.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("ABCDEFGHIJKLMNOPQRSTU")]
@@ -140,6 +150,7 @@ public sealed class GridModuleTests
     public void PixelTextSvgGenerator_RejectsInvalidText(string text)
         => Assert.Throws<ArgumentException>(() => PixelTextSvgGenerator.RenderSvg(text));
 
+    /// <summary>Verifies the pixel-text endpoint validates and renders text.</summary>
     [Theory]
     [InlineData("HELLO2", StatusCodes.Status200OK, "image/svg+xml")]
     [InlineData("HELLO-WORLD", StatusCodes.Status400BadRequest, null)]
@@ -176,6 +187,7 @@ public sealed class GridModuleTests
         }
     }
 
+    /// <summary>Verifies rendered pages embed SVG and selected grid settings.</summary>
     [Fact]
     public void RenderPage_EmbedsSvgAndUsesTheSelectedSettings()
     {
@@ -187,6 +199,7 @@ public sealed class GridModuleTests
         Assert.Contains("<svg id=\"cached\"></svg>", page);
     }
 
+    /// <summary>Verifies image-cache keys allow only route-safe characters.</summary>
     [Theory]
     [InlineData("valid-key_123.ext", true)]
     [InlineData("", false)]
@@ -196,6 +209,7 @@ public sealed class GridModuleTests
     public void ImageCacheKey_ValidatesRouteSafeKeys(string key, bool expected)
         => Assert.Equal(expected, ImageCacheKey.IsValid(key));
 
+    /// <summary>Verifies the image store persists and replaces cached content.</summary>
     [Fact]
     public async Task ImageStore_PersistsAndOverwritesCachedContent()
     {
@@ -225,6 +239,7 @@ public sealed class GridModuleTests
         }
     }
 
+    /// <summary>Verifies a cache hit skips SVG rendering.</summary>
     [Fact]
     public async Task CachedGridImageProvider_HitSkipsRenderer()
     {
@@ -240,6 +255,7 @@ public sealed class GridModuleTests
         Assert.Equal(0, cache.PutCount);
     }
 
+    /// <summary>Verifies a cache miss renders and stores the SVG.</summary>
     [Fact]
     public async Task CachedGridImageProvider_MissRendersAndStoresImage()
     {
@@ -256,6 +272,7 @@ public sealed class GridModuleTests
         Assert.Equal("<svg>generated</svg>", Encoding.UTF8.GetString(cache.LastPutContent!));
     }
 
+    /// <summary>Verifies cache failures fall back to SVG rendering.</summary>
     [Fact]
     public async Task CachedGridImageProvider_CacheFailureFallsBackToRenderer()
     {
@@ -270,6 +287,7 @@ public sealed class GridModuleTests
         Assert.Equal(1, renderer.RenderCount);
     }
 
+    /// <summary>Verifies request draining waits for active requests and rejects new ones.</summary>
     [Fact]
     public async Task RequestDrainTracker_WaitsForActiveRequestsAndRejectsNewRequests()
     {
@@ -285,6 +303,7 @@ public sealed class GridModuleTests
         await drained;
     }
 
+    /// <summary>Verifies a worker exits cleanly after receiving SIGTERM.</summary>
     [LinuxFact]
     public async Task WorkerProcess_StopAsync_AllowsSigtermHandlerToExit()
     {
@@ -300,6 +319,7 @@ public sealed class GridModuleTests
         Assert.Equal(23, worker.ExitCode);
     }
 
+    /// <summary>Verifies a worker is terminated when it ignores SIGTERM.</summary>
     [LinuxFact]
     public async Task WorkerProcess_StopAsync_KillsWorkerThatIgnoresSigterm()
     {
@@ -313,6 +333,7 @@ public sealed class GridModuleTests
         Assert.True(worker.HasExited);
     }
 
+    /// <summary>Verifies a crashed worker restarts and its stale socket is removed.</summary>
     [LinuxFact]
     public async Task WorkerManager_CleansSocketAfterCrashAndRestartsAfterSignals()
     {
@@ -434,6 +455,104 @@ public sealed class GridModuleTests
         }
     }
 
+    /// <summary>Verifies the circuit opens at its crash threshold and reset restarts the worker.</summary>
+    [LinuxFact]
+    public async Task WorkerManager_OpensCircuitAfterCrashThresholdAndRestartsAfterReset()
+    {
+        var directory = Directory.CreateTempSubdirectory("worker-circuit-test-");
+        var rendererPath = Path.Combine(AppContext.BaseDirectory, "ModularMonolith.Worker.SvgRenderer.dll");
+        var settings = new Dictionary<string, string?>
+        {
+            ["Workers:SocketDirectory"] = directory.FullName,
+            ["Workers:StartupTimeoutSeconds"] = "15",
+            ["Workers:ShutdownGracePeriod"] = "5",
+            ["Workers:CircuitBreaker:MaxCrashes"] = "2",
+            ["Workers:CircuitBreaker:WindowSeconds"] = "120",
+            ["Workers:SvgRenderer:Arguments:0"] = rendererPath
+        };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        var manager = new WorkerManager(
+            new LocalWorkerLauncher(new SigTermStopStrategy()),
+            new UnixSocketTransport(),
+            TestHostModuleCatalog.Create(ModuleCatalog.SvgRenderer),
+            configuration,
+            NullLogger<WorkerManager>.Instance,
+            new RequestDrainTracker());
+
+        try
+        {
+            await manager.StartAsync(CancellationToken.None);
+            Assert.False(manager.TryResetWorker(ModuleCatalog.SvgRenderer));
+            await CrashWorkerAsync(manager, restartCount: 1, expectedState: "Running");
+            await CrashWorkerAsync(manager, restartCount: 2, expectedState: "Open");
+
+            var openStatus = Assert.Single(manager.GetStatus());
+            Assert.Equal("Open", openStatus.State);
+            Assert.Null(openStatus.ProcessId);
+            await Task.Delay(TimeSpan.FromMilliseconds(1200));
+            Assert.Equal(openStatus, Assert.Single(manager.GetStatus()));
+
+            Assert.True(manager.TryResetWorker(ModuleCatalog.SvgRenderer));
+            var restarted = await WaitForWorkerStateAsync(manager, "Running", TimeSpan.FromSeconds(15));
+            Assert.Equal(2, restarted.RestartCount);
+            Assert.NotNull(restarted.ProcessId);
+        }
+        finally
+        {
+            await manager.StopAsync(CancellationToken.None);
+            directory.Delete(recursive: true);
+        }
+    }
+
+    private static async Task CrashWorkerAsync(WorkerManager manager, int restartCount, string expectedState)
+    {
+        var processId = Assert.Single(manager.GetStatus()).ProcessId;
+        Assert.NotNull(processId);
+        Assert.True(LinuxSignals.Send(processId.Value, LinuxSignals.SigKill));
+
+        var timeout = Stopwatch.StartNew();
+        do
+        {
+            var status = Assert.Single(manager.GetStatus());
+            if (status.RestartCount >= restartCount && status.State == expectedState)
+            {
+                if (expectedState == "Open")
+                {
+                    Assert.Null(status.ProcessId);
+                }
+
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+        while (timeout.Elapsed < TimeSpan.FromSeconds(15));
+
+        Assert.Fail($"Worker did not reach state '{expectedState}' after crash {restartCount}.");
+    }
+
+    private static async Task<WorkerStatus> WaitForWorkerStateAsync(
+        WorkerManager manager,
+        string expectedState,
+        TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        do
+        {
+            var status = Assert.Single(manager.GetStatus());
+            if (status.State == expectedState)
+            {
+                return status;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+        while (stopwatch.Elapsed < timeout);
+
+        Assert.Fail($"Worker did not reach state '{expectedState}'.");
+        throw new UnreachableException();
+    }
+
     private static int Count(string source, string value)
     {
         var count = 0;
@@ -465,11 +584,13 @@ public sealed class GridModuleTests
         public string? LastPutKey { get; private set; }
         public byte[]? LastPutContent { get; private set; }
 
+        /// <summary>Returns the cached test value or a simulated cache failure.</summary>
         public Task<byte[]?> GetAsync(string key, CancellationToken cancellationToken)
             => ThrowOnRead
                 ? Task.FromException<byte[]?>(new HttpRequestException("cache unavailable"))
                 : Task.FromResult(cached);
 
+        /// <summary>Records a cached test value or returns a simulated cache failure.</summary>
         public Task PutAsync(string key, byte[] svg, CancellationToken cancellationToken)
         {
             PutCount++;
@@ -484,12 +605,14 @@ public sealed class GridModuleTests
         public string Svg { get; init; } = "<svg />";
         public int RenderCount { get; private set; }
 
+        /// <summary>Returns the configured test SVG and counts render calls.</summary>
         public Task<string> RenderSvgAsync(GridSettings settings, CancellationToken cancellationToken)
         {
             RenderCount++;
             return Task.FromResult(Svg);
         }
 
+        /// <summary>Returns a simple test page containing the requested SVG.</summary>
         public Task<string> RenderPageAsync(RenderPageRequest request, CancellationToken cancellationToken)
             => Task.FromResult($"<html>{request.SvgContent}</html>");
     }
