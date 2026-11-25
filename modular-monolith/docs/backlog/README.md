@@ -12,7 +12,8 @@ This backlog formalizes the architectural gaps identified between the target sys
 | [BL-0002](bl-0002.md) | Done | YARP Reverse Proxy for Dynamic Gateway Routing | Tier 1 (Host/Edge) | High | Medium | BL-0001 |
 | [BL-0003](bl-0003.md) | Done | Roslyn Source Generator for Module Onboarding (`WorkerSourceGenerator`) | Packaging & DevEx | High | High | None |
 | [BL-0004](bl-0004.md) | Done | Unified Packaging Pipeline & Single Distribution Bundle | Packaging & Deploy | Medium | Medium | BL-0003 |
-| [BL-0005](bl-0005.md) | Proposed | Circuit Breaking, Poison-Pill Quarantine & Dead-Letter Handling | Tier 4 (Resilience) | Medium | High | BL-0001, BL-0002 |
+| [BL-0005](bl-0005.md) | Done | Circuit Breaking, Poison-Pill Quarantine & Dead-Letter Handling | Tier 4 (Resilience) | Medium | High | BL-0001, BL-0002 |
 | [BL-0006](bl-0006.md) | Proposed | High-Throughput Shared Memory IPC (MMF / Ring Buffer) | Tier 3 (Transport) | Low | High | BL-0001 |
+| [BL-0007](bl-0007.md) | Proposed | In-Memory Module Execution for Debugging | Host & DevEx | — | — | None identified |
 
 ---

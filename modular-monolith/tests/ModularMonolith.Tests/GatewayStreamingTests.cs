@@ -20,10 +20,12 @@ namespace ModularMonolith.Tests;
 
 public sealed class GatewayStreamingTests
 {
+    /// <summary>Verifies Unix socket proxying streams the first chunk before the worker completes.</summary>
     [LinuxFact]
     public Task UnixSocket_ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes()
         => ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes(new UnixSocketTransport());
 
+    /// <summary>Verifies Named Pipe proxying streams the first chunk before the worker completes.</summary>
     [WindowsFact]
     public Task NamedPipe_ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes()
         => ReverseProxy_ForwardsFirstResponseChunkBeforeWorkerCompletes(new NamedPipeTransport());
@@ -126,21 +128,30 @@ public sealed class GatewayStreamingTests
 
     private sealed class RoutingSource(WorkerEndpoint endpoint) : IWorkerRoutingSource, IWorkerEndpointResolver
     {
+        /// <summary>Observes the test worker's routing snapshot updates.</summary>
         public event EventHandler<IReadOnlyList<WorkerRoutingSnapshot>>? TopologyChanged
         {
             add { }
             remove { }
         }
 
+        /// <summary>Returns the ready test worker route.</summary>
         public IReadOnlyList<WorkerRoutingSnapshot> GetRoutingSnapshot()
             => [new("streamer", endpoint, true, "ready")];
 
+        /// <summary>Returns the endpoint used by the streaming test worker.</summary>
         public WorkerEndpoint GetEndpoint(string name)
         {
             Assert.Equal("streamer", name);
             return endpoint;
         }
 
+        /// <summary>Reports that the test worker is ready.</summary>
         public bool IsRunning(string name) => true;
+
+        /// <summary>Ignores worker failures because this test does not supervise a process.</summary>
+        public void ObserveWorkerFailure(string name)
+        {
+        }
     }
 }

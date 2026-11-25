@@ -14,6 +14,7 @@ internal sealed class WorkerClientTestServices : IDisposable
 {
     private readonly ServiceProvider _provider;
 
+    /// <summary>Builds worker HTTP clients for integration tests.</summary>
     public WorkerClientTestServices(WorkerManager manager, IWorkerTransport transport, IConfiguration configuration)
     {
         var services = new ServiceCollection();
@@ -21,6 +22,7 @@ internal sealed class WorkerClientTestServices : IDisposable
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton<IWorkerTransport>(transport);
         services.AddSingleton<IWorkerEndpointResolver>(manager);
+        services.AddSingleton(manager.RequestTracker);
         services.AddWorkerHttpResilience();
         services.AddSingleton<IWorkerClientFactory, WorkerClientFactory>();
         services.AddGeneratedWorkerModules();
@@ -36,8 +38,14 @@ internal sealed class WorkerClientTestServices : IDisposable
             codec.Encode(new ClaimsPrincipal(new ClaimsIdentity()), []);
     }
 
+    /// <summary>Returns a registered test service.</summary>
     public T GetRequiredService<T>() where T : notnull => _provider.GetRequiredService<T>();
 
+    /// <summary>Sets the current request context used by worker request tracking.</summary>
+    public void SetWorkerRequest(WorkerRequestContext request)
+        => _provider.GetRequiredService<IHttpContextAccessor>().HttpContext!.Items[WorkerRequestContext.ItemKey] = request;
+
+    /// <summary>Disposes the test service provider and its owned clients.</summary>
     public void Dispose() => _provider.Dispose();
 
     private sealed class FixedWorkerContextHandler(WorkerInternalContext codec) : DelegatingHandler

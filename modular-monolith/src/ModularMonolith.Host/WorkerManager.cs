@@ -31,15 +31,22 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, I
     private readonly ILogger<WorkerManager> _logger;
     private readonly RequestDrainTracker _requestDrainTracker;
     private readonly WorkerSigningKey _signingKey;
+    private readonly WorkerRequestTracker _requestTracker;
+    private readonly TimeProvider _timeProvider;
+    private readonly int _crashThreshold;
+    private readonly TimeSpan _crashWindow;
     private readonly Dictionary<string, ManagedWorker> _workers;
     private readonly object _gate = new();
     private readonly List<Task> _supervisors = [];
     private CancellationTokenSource? _supervisorCancellation;
     private IEndpointAllocator? _endpointAllocator;
     private int _stopping;
+
+    /// <summary>Occurs when worker destinations or readiness states change.</summary>
     public event EventHandler<IReadOnlyList<WorkerRoutingSnapshot>>? TopologyChanged;
 
     internal WorkerSigningKey SigningKey => _signingKey;
+    internal WorkerRequestTracker RequestTracker => _requestTracker;
 
     public WorkerManager(
         IWorkerLauncher workerLauncher,
@@ -48,7 +55,9 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, I
         IConfiguration configuration,
         ILogger<WorkerManager> logger,
         RequestDrainTracker requestDrainTracker,
-        WorkerSigningKey? signingKey = null)
+        WorkerSigningKey? signingKey = null,
+        WorkerRequestTracker? requestTracker = null,
+        TimeProvider? timeProvider = null)
     {
         _workerLauncher = workerLauncher;
         _transport = transport;
@@ -56,6 +65,21 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, I
         _logger = logger;
         _requestDrainTracker = requestDrainTracker;
         _signingKey = signingKey ?? WorkerSigningKey.Create();
+        _requestTracker = requestTracker ?? new WorkerRequestTracker(configuration, timeProvider);
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _crashThreshold = configuration.GetValue("Workers:CircuitBreaker:MaxCrashes", 3);
+        var crashWindowSeconds = configuration.GetValue("Workers:CircuitBreaker:WindowSeconds", 120);
+        if (_crashThreshold <= 0)
+        {
+            throw new InvalidOperationException("Workers:CircuitBreaker:MaxCrashes must be greater than zero.");
+        }
+
+        if (crashWindowSeconds <= 0)
+        {
+            throw new InvalidOperationException("Workers:CircuitBreaker:WindowSeconds must be greater than zero.");
+        }
+
+        _crashWindow = TimeSpan.FromSeconds(crashWindowSeconds);
         _workers = modules.Modules.Select(CreateDefinition).ToDictionary(worker => worker.Name, StringComparer.Ordinal);
     }
 
@@ -227,6 +251,66 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, I
         }
     }
 
+    /// <summary>Resets a registered worker's open circuit and permits its supervisor to restart it.</summary>
+    public bool TryResetWorker(string name)
+    {
+        var reset = false;
+        lock (_gate)
+        {
+            if (!_workers.TryGetValue(name, out var worker))
+            {
+                return false;
+            }
+
+            if (worker.State == "Open")
+            {
+                worker.CrashTimes.Clear();
+                worker.State = "Restarting";
+                worker.ResetRequested.TrySetResult();
+                reset = true;
+            }
+        }
+
+        if (reset)
+        {
+            PublishTopologyChanged();
+        }
+
+        return reset;
+    }
+
+    /// <summary>Counts a process exit discovered while a request was using the worker.</summary>
+    public void ObserveWorkerFailure(string name)
+    {
+        ManagedWorker? worker;
+        WorkerProcess? process;
+        lock (_gate)
+        {
+            if (!_workers.TryGetValue(name, out worker))
+            {
+                return;
+            }
+
+            process = worker.Process;
+        }
+
+        if (process is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (process.HasExited)
+            {
+                RecordUnexpectedExit(worker, process);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
     /// <summary>Returns the routing state used to rebuild YARP configuration.</summary>
     public IReadOnlyList<WorkerRoutingSnapshot> GetRoutingSnapshot()
     {
@@ -357,30 +441,72 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, I
                 restartDelay = MinimumRestartDelay;
             }
 
+            RecordUnexpectedExit(worker, process);
+            bool circuitOpen;
             lock (_gate)
             {
-                worker.Process = null;
-                worker.State = "Restarting";
-                worker.RestartCount++;
+                if (ReferenceEquals(worker.Process, process))
+                {
+                    worker.Process = null;
+                }
+
+                circuitOpen = worker.State == "Open";
             }
             PublishTopologyChanged();
 
             RemoveStaleEndpoint(worker);
             lock (_gate)
             {
-                worker.Endpoint = _endpointAllocator!.Allocate(worker.Name);
+                worker.Endpoint = null;
             }
             process.Dispose();
+
+            if (circuitOpen)
+            {
+                try
+                {
+                    await worker.ResetRequested.Task.WaitAsync(cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                lock (_gate)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    worker.ResetRequested = NewResetSignal();
+                    worker.Endpoint = _endpointAllocator!.Allocate(worker.Name);
+                    worker.State = "Restarting";
+                }
+                restartDelay = MinimumRestartDelay;
+                PublishTopologyChanged();
+            }
+            else
+            {
+                lock (_gate)
+                {
+                    worker.Endpoint = _endpointAllocator!.Allocate(worker.Name);
+                }
+            }
+
             var delayBeforeRestart = restartDelay;
             restartDelay = TimeSpan.FromSeconds(Math.Min(restartDelay.TotalSeconds * 2, MaximumRestartDelay.TotalSeconds));
-            _logger.LogWarning("Worker {WorkerName} exited with code {ExitCode}; restarting after {Delay}.", worker.Name, exitCode, delayBeforeRestart);
-            try
+            if (!circuitOpen)
             {
-                await Task.Delay(delayBeforeRestart, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return;
+                _logger.LogWarning("Worker {WorkerName} exited with code {ExitCode}; restarting after {Delay}.", worker.Name, exitCode, delayBeforeRestart);
+                try
+                {
+                    await Task.Delay(delayBeforeRestart, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
             }
 
             while (!cancellationToken.IsCancellationRequested)
@@ -405,6 +531,7 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, I
                     lock (_gate)
                     {
                         worker.State = "Running";
+                        worker.ResetRequested = NewResetSignal();
                     }
                     PublishTopologyChanged();
 
@@ -438,6 +565,50 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, I
         }
     }
 
+    private void RecordUnexpectedExit(ManagedWorker worker, WorkerProcess process)
+    {
+        var opened = false;
+        var crashCount = 0;
+        lock (_gate)
+        {
+            if (Volatile.Read(ref _stopping) != 0
+                || worker.State != "Running"
+                || !ReferenceEquals(worker.Process, process)
+                || ReferenceEquals(worker.LastCountedProcess, process))
+            {
+                return;
+            }
+
+            var now = _timeProvider.GetUtcNow();
+            while (worker.CrashTimes.TryPeek(out var oldest) && now - oldest > _crashWindow)
+            {
+                worker.CrashTimes.Dequeue();
+            }
+
+            worker.CrashTimes.Enqueue(now);
+            worker.RestartCount++;
+            _requestTracker.RecordWorkerCrash(worker.Name);
+            opened = worker.CrashTimes.Count >= _crashThreshold;
+            worker.State = opened ? "Open" : "Restarting";
+            worker.LastCountedProcess = process;
+            crashCount = worker.CrashTimes.Count;
+        }
+
+        if (opened)
+        {
+            _logger.LogError(
+                "Worker {WorkerName} opened its circuit after {CrashCount} crashes within {Window}.",
+                worker.Name,
+                crashCount,
+                _crashWindow);
+        }
+
+        PublishTopologyChanged();
+    }
+
+    private static TaskCompletionSource NewResetSignal()
+        => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private void ReleaseEndpoints()
     {
         _endpointAllocator?.Dispose();
@@ -467,8 +638,11 @@ internal sealed class WorkerManager : IHostedService, IWorkerEndpointResolver, I
         public string ExecutablePath { get; } = executablePath;
         public IReadOnlyList<string> Arguments { get; } = arguments;
         public JobLimits Limits { get; } = limits;
+        public Queue<DateTimeOffset> CrashTimes { get; } = new();
         public WorkerEndpoint? Endpoint { get; set; }
         public WorkerProcess? Process { get; set; }
+        public WorkerProcess? LastCountedProcess { get; set; }
+        public TaskCompletionSource ResetRequested { get; set; } = NewResetSignal();
         public string State { get; set; } = "Stopped";
         public int RestartCount { get; set; }
     }
